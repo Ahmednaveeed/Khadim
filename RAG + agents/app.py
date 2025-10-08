@@ -16,6 +16,7 @@ all_texts = load_texts()
 def get_index():
     return build_index(all_texts)
 
+##
 # Initialize all required components in session state
 if 'conversation_manager' not in st.session_state:
     st.session_state.conversation_manager = ConversationManager(max_history=6)
