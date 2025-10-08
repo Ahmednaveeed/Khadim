@@ -9,7 +9,7 @@ CREATE TABLE chef (
     max_current_orders INT
 );
 
-
+--
 CREATE TABLE menu_item (
     item_id SERIAL PRIMARY KEY,
     item_name TEXT NOT NULL,
