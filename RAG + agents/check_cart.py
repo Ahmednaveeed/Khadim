@@ -1,6 +1,8 @@
 from database_connection import DatabaseConnection
 from psycopg2.extras import RealDictCursor
 
+
+##
 def check_cart_contents():
     db = DatabaseConnection.get_instance()
     with db.get_connection() as conn:

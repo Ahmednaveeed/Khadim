@@ -4,6 +4,8 @@ from datetime import datetime
 from database_connection import DatabaseConnection
 from psycopg2.extras import RealDictCursor
 
+
+##
 class PostgresCartManager:
     def __init__(self):
         self.db = DatabaseConnection.get_instance()

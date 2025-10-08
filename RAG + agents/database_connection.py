@@ -21,5 +21,6 @@ class DatabaseConnection:
             'port': '5432'
         }
     
+    ##
     def get_connection(self):
         return psycopg2.connect(**self.conn_params)
