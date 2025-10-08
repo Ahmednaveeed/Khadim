@@ -24,6 +24,8 @@ def format_deal(row):
         text += f"\nIncludes: {row['items']}"
     return text
 
+##
+
 def load_texts():
     """
     Connects to the database, runs the menu and deal queries,
