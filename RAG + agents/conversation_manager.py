@@ -19,6 +19,7 @@ class ConversationManager:
         """Get the current conversation history"""
         return self.conversation_history
     
+    ##
     def clear_history(self):
         """Clear the conversation history"""
         self.conversation_history = []

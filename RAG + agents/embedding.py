@@ -23,6 +23,7 @@ def embed_text(text):
     # Access the first embedding vector properly
     return np.array(response.data[0].embedding, dtype=np.float32)
 
+##
 # Step 4 functions from before (use your exact function implementations)
 def format_menu_item(row):
     text = f"Menu Item: {row.item_name}"

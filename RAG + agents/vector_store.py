@@ -17,6 +17,7 @@ def build_index(texts: list[str]):
     idx = faiss.IndexFlatL2(dim)
     idx.add(np.stack(embs))
     return idx
+##
 
 def query_index(index, texts, query: str, k=6):
     qv = embed_text(query)
