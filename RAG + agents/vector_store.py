@@ -1,35 +1,63 @@
-import os
 import numpy as np
 import faiss
+import pickle
 from openai import OpenAI
+import os
 from dotenv import load_dotenv
 
+# We need the data loader from your other file
+from search_agent import load_texts
+
+# --- CONFIGURATION ---
 load_dotenv()
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+EMBEDDING_MODEL = "text-embedding-3-small"
+FAISS_INDEX_PATH = "faiss_index.bin"
+TEXT_DATA_PATH = "text_data.pkl"
 
-def embed_text(text: str) -> np.ndarray:
-    resp = client.embeddings.create(model="text-embedding-ada-002", input=text)
-    return np.array(resp.data[0].embedding, dtype=np.float32)
+# --- FUNCTIONS ---
 
-def build_index(texts: list[str]):
-    embs = [embed_text(t) for t in texts]
-    dim = embs[0].shape[0]
-    idx = faiss.IndexFlatL2(dim)
-    idx.add(np.stack(embs))
-    return idx
-##
+def create_and_save_vector_store(texts: list[str]):
+    """
+    Takes a list of texts, creates embeddings IN A SINGLE BATCH, builds a FAISS index,
+    and saves both the index and the original texts to files.
+    """
+    if not texts:
+        print("No texts to process. Exiting.")
+        return
 
-def query_index(index, texts, query: str, k=6):
-    qv = embed_text(query)
-    D, I = index.search(np.array([qv]), k)
+    print(f"Starting embedding process for {len(texts)} text blocks using '{EMBEDDING_MODEL}' in a single batch...")
     
-    # Filter out results that are too dissimilar (high distance means less relevant)
-    # Standard threshold for L2 distance in embedding space
-    threshold = 0.8
+    # --- THIS IS THE FIX ---
+    # 1. Create embeddings for all text blocks in one API call
+    response = client.embeddings.create(input=texts, model=EMBEDDING_MODEL)
+    embeddings = np.array([item.embedding for item in response.data], dtype='float32')
+    # --- END OF FIX ---
+
+    print("Embeddings created successfully.")
     
-    filtered_results = []
-    for dist, idx in zip(D[0], I[0]):
-        if dist < threshold:  # Only include results that are similar enough
-            filtered_results.append(texts[idx])
+    # 2. Build the FAISS index
+    dimension = embeddings.shape[1]
+    index = faiss.IndexFlatL2(dimension)
+    index.add(embeddings)
     
-    return filtered_results
+    print(f"FAISS index with {index.ntotal} vectors created.")
+    
+    # 3. Save the FAISS index to a file
+    faiss.write_index(index, FAISS_INDEX_PATH)
+    print(f"FAISS index saved to '{FAISS_INDEX_PATH}'")
+    
+    # 4. Save the original texts to a corresponding file
+    with open(TEXT_DATA_PATH, 'wb') as f:
+        pickle.dump(texts, f)
+    print(f"Original texts saved to '{TEXT_DATA_PATH}'")
+    
+    print("\nVector store build process complete!")
+
+# --- MAIN EXECUTION ---
+
+if __name__ == "__main__":
+    print("Loading menu and deal information from the database...")
+    all_texts = load_texts()
+    
+    create_and_save_vector_store(all_texts)

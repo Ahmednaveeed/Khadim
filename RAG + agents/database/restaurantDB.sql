@@ -9,7 +9,7 @@ CREATE TABLE chef (
     max_current_orders INT
 );
 
---
+
 CREATE TABLE menu_item (
     item_id SERIAL PRIMARY KEY,
     item_name TEXT NOT NULL,
@@ -359,7 +359,7 @@ INSERT INTO menu_item (
 -- adding deals
 ----------------------
 
--- Insert deals (no JSON column) ----------------------------------
+-- Insert deals 
 
 INSERT INTO deal (deal_name, deal_price, serving_size) VALUES
 ('Fast Solo A',         ROUND((450+200+150)*0.9,2), 1),
@@ -514,3 +514,5 @@ SELECT item_id, (SELECT cheff_id FROM chef WHERE cheff_name = 'Fazal Haq')
 FROM menu_item
 WHERE item_category = 'drink';
 
+
+DROP TABLE cart_items;
