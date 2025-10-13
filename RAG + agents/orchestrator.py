@@ -11,6 +11,7 @@ from search_agent import load_texts
 from conversation_manager import ConversationManager
 from cart_agent import CartAgent
 from database_connection import DatabaseConnection
+from order_agent import OrderAgent
 from chat_agent import get_ai_response 
 from rag_retriever import RAGRetriever
 
@@ -58,6 +59,7 @@ if "initialized" not in st.session_state:
     st.session_state.conv_mgr = ConversationManager(max_history=10)
     st.session_state.search_agent = SearchAgent() # For precise tool lookups
     st.session_state.cart_agent = CartAgent()
+    st.session_state.order_agent = OrderAgent()
     st.session_state.rag_retriever = RAGRetriever() # For fast conversational search
     st.session_state.cart_id = str(uuid.uuid4())
     db = DatabaseConnection.get_instance()
@@ -78,14 +80,35 @@ with st.sidebar:
         for item in summary["items"]:
             st.write(f"{item['quantity']}× {item['item_name']} @ Rs. {item['unit_price']:.2f} = Rs. {item['total_price']:.2f}")
         st.markdown(f"**Total:** Rs. {summary['total_price']:.2f}")
+        # In orchestrator.py -> with st.sidebar: (New Corrected Code)
         if st.button("Place Order"):
+            # Get references to the necessary agents
             cart = st.session_state.cart_agent
-            result = cart.place_order(st.session_state.cart_id)
-            st.success(result['message'])
-            if result.get('success'):
-                new_cart_id = str(uuid.uuid4())
-                st.session_state.cart_id = new_cart_id
-                cart.create_cart(new_cart_id)
+            order_agent = st.session_state.order_agent
+
+            # Step 1: Finalize the cart (clear items, mark inactive)
+            finalize_result = cart.place_order(st.session_state.cart_id)
+            
+            if finalize_result.get('success'):
+                cart_summary = finalize_result.get('order_data')
+                
+                # Step 2: Pass data to the Order Agent to save and summarize
+                order_result = order_agent.save_and_summarize_order(
+                    st.session_state.cart_id, 
+                    cart_summary
+                )
+                
+                # Use the message from the Order Agent
+                st.success(order_result['message'])
+                
+                # Step 3: If the order was saved, create a new cart
+                if order_result.get('success'):
+                    new_cart_id = str(uuid.uuid4())
+                    st.session_state.cart_id = new_cart_id
+                    cart.create_cart(new_cart_id)
+            else:
+                st.warning(finalize_result['message']) # Show error if cart was empty
+
             st.rerun()
 
 # Main chat interface
@@ -149,13 +172,35 @@ if submitted and user_input:
                 bot_response += f"**Total: Rs. {summary['total_price']:.2f}**"
         
         elif function_name == "place_order":
-            result = cart.place_order(st.session_state.cart_id)
-            bot_response = result['message']
-            if result.get('success'):
-                new_cart_id = str(uuid.uuid4())
-                st.session_state.cart_id = new_cart_id
-                cart.create_cart(new_cart_id)
-                bot_response += "\n\nI've started a new empty cart for you."
+            # Get the order agent from the session state
+            order_agent = st.session_state.order_agent
+
+            # Step 1: Finalize the current cart. This clears the cart_items and returns the cart's data.
+            finalize_result = cart.place_order(st.session_state.cart_id)
+            
+            # Check if the cart was finalized successfully (i.e., it wasn't empty)
+            if finalize_result.get('success'):
+                cart_summary = finalize_result.get('order_data')
+                
+                # Step 2: Pass the cart data to the new Order Agent. 
+                # This agent saves the order to the 'orders' table and creates the final summary.
+                order_result = order_agent.save_and_summarize_order(
+                    st.session_state.cart_id, 
+                    cart_summary
+                )
+                
+                # The final message for the user now comes from the Order Agent
+                bot_response = order_result['message']
+                
+                # Step 3: If the order was successfully saved, create a new cart for the next session.
+                if order_result.get('success'):
+                    new_cart_id = str(uuid.uuid4())
+                    st.session_state.cart_id = new_cart_id
+                    cart.create_cart(new_cart_id)
+                    bot_response += "\n\nI've started a new empty cart for you."
+            else:
+                # This handles the case where the cart was empty to begin with.
+                bot_response = finalize_result['message']
     
     else:
         # If no tool was called, it's a conversational response from the RAG context

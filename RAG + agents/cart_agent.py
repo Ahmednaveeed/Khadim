@@ -226,11 +226,11 @@ class CartAgent:
     
     def place_order(self, cart_id: str) -> Dict:
         """
-        Saves cart summary to the cart table, marks cart as inactive,
-        and clears the items from the cart_items table.
+        Marks the cart as inactive and clears the items from cart_items table.
+        It does NOT save the order to the 'orders' table (that's the OrderAgent's job).
+        It returns the summary for the OrderAgent to use.
         """
         try:
-            # First, get the current contents of the cart.
             cart_summary = self.get_cart_summary(cart_id)
             
             if cart_summary['is_empty']:
@@ -240,19 +240,15 @@ class CartAgent:
                     'order_data': None
                 }
             
-            # Convert the summary dictionary to a JSON string to store in the DB.
-            summary_json = json.dumps(cart_summary)
-            
             with self.db.get_connection() as conn:
                 with conn.cursor() as cur:
-                    # 1. Update the cart table: set status and save the summary.
+                    # 1. Mark the cart as inactive
                     cur.execute("""
                         UPDATE cart 
                         SET status = 'inactive', 
-                            order_summary = %s, 
                             updated_at = CURRENT_TIMESTAMP 
                         WHERE cart_id = %s
-                    """, (summary_json, cart_id,))
+                    """, (cart_id,))
                     
                     # 2. Delete the items from the active cart_items table.
                     cur.execute("""
@@ -264,14 +260,14 @@ class CartAgent:
             
             return {
                 'success': True,
-                'message': f"Order placed successfully! Total was Rs. {cart_summary['total_price']:.2f}",
-                'order_data': cart_summary
+                'message': "Cart successfully converted to an order.",
+                'order_data': cart_summary # Pass data to the OrderAgent
             }
             
         except Exception as e:
             return {
                 'success': False,
-                'message': f"Failed to place order: {str(e)}",
+                'message': f"Cart Agent failed to finalize cart: {str(e)}",
                 'order_data': None
             }
     
