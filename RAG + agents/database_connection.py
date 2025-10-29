@@ -19,9 +19,9 @@ class DatabaseConnection:
         # Database connection parameters
         # Update these according to your setup
         self.conn_params = {
-            'dbname': 'restaurantDB',
+            'dbname': 'Khadim',
             'user': 'postgres', 
-            'password': '7980',
+            'password': 'haris180',
             'host': 'localhost',
             'port': '5432'
         }

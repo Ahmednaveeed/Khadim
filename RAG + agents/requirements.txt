@@ -6,3 +6,6 @@ langchain
 faiss-cpu
 python-dotenv
 numpy
+redis
+requests
+tiktoken

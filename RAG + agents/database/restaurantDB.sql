@@ -1,4 +1,18 @@
 ----------------------
+-- NUKING OLD TABLES (for safe re-running)
+----------------------
+DROP TABLE IF EXISTS deal_item CASCADE;
+DROP TABLE IF EXISTS menu_item_chefs CASCADE;
+DROP TABLE IF EXISTS deal CASCADE;
+DROP TABLE IF EXISTS menu_item CASCADE;
+DROP TABLE IF EXISTS chef CASCADE;
+
+-- Also drop agent-created tables
+DROP TABLE IF EXISTS cart_items CASCADE;
+DROP TABLE IF EXISTS cart CASCADE;
+DROP TABLE IF EXISTS orders CASCADE;
+
+----------------------
 -- creating tables
 ----------------------
 CREATE TABLE chef (
@@ -515,4 +529,4 @@ FROM menu_item
 WHERE item_category = 'drink';
 
 
-DROP TABLE cart_items;
+-- DROP TABLE cart_items;
