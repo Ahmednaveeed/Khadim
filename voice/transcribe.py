@@ -83,6 +83,9 @@
 # else:
 #     print("No successful transcriptions — please check file paths!")
 
+
+#### main code 2
+## switch here
 import torch
 import librosa
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
