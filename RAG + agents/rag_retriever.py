@@ -1,55 +1,39 @@
-# rag_retriever.py
+﻿import os
+from dotenv import load_dotenv
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 
-import faiss
-import pickle
-import numpy as np
-from openai import OpenAI
-import os
+load_dotenv()
 
-# --- CONFIGURATION ---
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-EMBEDDING_MODEL = "text-embedding-3-small"
-FAISS_INDEX_PATH = "faiss_index.bin"
-TEXT_DATA_PATH = "text_data.pkl"
+FAISS_INDEX_PATH = "faiss_index"
+embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+
 
 class RAGRetriever:
+    """Retriever for RAG-based menu context search."""
+    
     def __init__(self):
-        """
-        Initializes the retriever by loading the pre-built FAISS index
-        and the corresponding text data from disk.
-        """
+        self.vectorstore = None
         try:
-            print("Loading RAG knowledge base from files...")
-            self.index = faiss.read_index(FAISS_INDEX_PATH)
-            with open(TEXT_DATA_PATH, 'rb') as f:
-                self.texts = pickle.load(f)
-            print("RAG knowledge base loaded successfully.")
+            print("Loading RAG knowledge base from FAISS index...")
+            self.vectorstore = FAISS.load_local(
+                FAISS_INDEX_PATH,
+                embeddings,
+                allow_dangerous_deserialization=True
+            )
+            print("✅ RAG knowledge base loaded successfully.")
         except Exception as e:
-            print(f"FATAL: Could not load RAG knowledge base: {e}")
-            print("Please ensure you have run 'build_vector_store.py' successfully.")
-            self.index = None
-            self.texts = []
+            print(f"❌ FATAL: Could not load RAG knowledge base: {e}")
+            print("Please ensure you have run 'python vector_store.py' to generate the index.")
 
-    def _embed_text(self, text: str) -> np.ndarray:
-        """Generates an embedding for a given text query."""
-        response = client.embeddings.create(input=text, model=EMBEDDING_MODEL)
-        return np.array(response.data[0].embedding, dtype='float32')
-
-    def search(self, query: str, k: int = 10) -> str:
-        """
-        Takes a user query, embeds it, searches the FAISS index for the
-        top k most relevant text chunks, and returns them as a single string.
-        """
-        if self.index is None:
-            return "Error: Knowledge base not loaded."
-
-        query_vector = self._embed_text(query).reshape(1, -1)
+    def search(self, query: str, k: int = 5) -> str:
+        if self.vectorstore is None:
+            return ""
         
-        # Search the index
-        distances, indices = self.index.search(query_vector, k)
-        
-        # Retrieve the corresponding texts
-        results = [self.texts[i] for i in indices[0]]
-        
-        # Combine results into a single context block
-        return "\n\n---\n\n".join(results)
+        try:
+            docs = self.vectorstore.similarity_search(query, k=k)
+            results = [doc.page_content for doc in docs]
+            return "\n\n---\n\n".join(results)
+        except Exception as e:
+            print(f"Error during RAG search: {str(e)}")
+            return ""

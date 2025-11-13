@@ -1,16 +1,22 @@
-import uuid
-import re
-from typing import Dict, List, Optional, Any
-from database_connection import DatabaseConnection
-from psycopg2.extras import RealDictCursor
+# cart_agent.py
 import json
+import uuid
+from typing import Dict, List, Optional
+from psycopg2.extras import RealDictCursor
+from dotenv import load_dotenv
+
+# Import your project utilities
+from database_connection import DatabaseConnection
 from redis_connection import RedisConnection
 from config import AGENT_TASKS_CHANNEL
 
-class CartAgent:
+load_dotenv()
+
+class CartTools:
     """
-    Cart agent for Khadim
-    Handles: add items, remove items, view cart, clear cart, and place order.
+    This class holds the 'Tools' (Functions) for the Cart Agent.
+    Instead of using @tool (which is for AI), we define them as class methods 
+    backed by the Database.
     """
     
     def __init__(self):
@@ -18,37 +24,32 @@ class CartAgent:
         self._init_tables()
     
     def _init_tables(self):
-        """Initialize cart tables if they don't exist"""
-        schema = """
-        CREATE TABLE IF NOT EXISTS cart (
-            cart_id UUID PRIMARY KEY,
-            status TEXT DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
-            created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
-            order_summary JSONB
-        );
-        
-        CREATE TABLE IF NOT EXISTS cart_items (
-            cart_id UUID REFERENCES cart(cart_id) ON DELETE CASCADE,
-            item_id INTEGER NOT NULL,
-            item_type TEXT CHECK (item_type IN ('menu_item', 'deal')),
-            item_name TEXT NOT NULL,
-            quantity INTEGER DEFAULT 1,
-            unit_price DECIMAL(10,2) NOT NULL,
-            special_requests TEXT,
-            PRIMARY KEY (cart_id, item_id, item_type)
-        );
-        """
-        
+        """Initialize cart tables in Postgres"""
         with self.db.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(schema)
+                cur.execute("""
+                    CREATE TABLE IF NOT EXISTS cart (
+                        cart_id UUID PRIMARY KEY,
+                        status TEXT DEFAULT 'active',
+                        updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+                    );
+                    CREATE TABLE IF NOT EXISTS cart_items (
+                        cart_id UUID REFERENCES cart(cart_id) ON DELETE CASCADE,
+                        item_id INTEGER,
+                        item_type TEXT, 
+                        item_name TEXT,
+                        quantity INTEGER,
+                        unit_price DECIMAL(10,2),
+                        PRIMARY KEY (cart_id, item_id, item_type)
+                    );
+                """)
                 conn.commit()
-    
-    def create_cart(self, user_id: str = None) -> str:
-        """Create new active cart"""
+
+    # --- THE TOOLS ---
+
+    def create_cart(self, user_id: str) -> Dict:
+        """Creates a new cart session in the DB."""
         cart_id = user_id or str(uuid.uuid4())
-        
         with self.db.get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -56,298 +57,159 @@ class CartAgent:
                     (cart_id,)
                 )
                 conn.commit()
-        
-        return cart_id
-    
-    def add_item(self, cart_id: str, item_data: Dict, quantity: int = 1, 
-                 special_requests: str = None) -> Dict:
-        """
-        Add item to cart
-        item_data should contain: item_id, item_name, price, and optionally deal_id
-        """
+        return {'success': True, 'cart_id': cart_id, 'message': "Cart created"}
+
+    def add_item(self, cart_id: str, item_data: Dict, quantity: int = 1) -> Dict:
+        """Adds an item to the database."""
         try:
-            # Ensure cart exists
-            self.create_cart(cart_id)
+            self.create_cart(cart_id) # Ensure cart exists
             
-            with self.db.get_connection() as conn:
-                with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # Determine item type and ID
-                    item_type = 'deal' if 'deal_id' in item_data else 'menu_item'
-                    item_id = item_data.get('deal_id', item_data.get('item_id'))
-                    
-                    # Check if item already exists
-                    cur.execute("""
-                        SELECT quantity FROM cart_items 
-                        WHERE cart_id = %s AND item_id = %s AND item_type = %s
-                    """, (cart_id, item_id, item_type))
-                    
-                    existing = cur.fetchone()
-                    
-                    if existing:
-                        # Update existing item
-                        new_quantity = existing['quantity'] + quantity
-                        cur.execute("""
-                            UPDATE cart_items 
-                            SET quantity = %s, special_requests = %s
-                            WHERE cart_id = %s AND item_id = %s AND item_type = %s
-                        """, (new_quantity, special_requests, cart_id, item_id, item_type))
-                        message = f"Updated {item_data['item_name']} quantity to {new_quantity}"
-                    else:
-                        # Add new item
-                        cur.execute("""
-                            INSERT INTO cart_items 
-                            (cart_id, item_id, item_type, item_name, quantity, unit_price, special_requests)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
-                        """, (cart_id, item_id, item_type, item_data['item_name'], 
-                              quantity, item_data['price'], special_requests))
-                        message = f"Added {quantity}x {item_data['item_name']} to cart"
-                    
-                    # Update cart timestamp
-                    cur.execute(
-                        "UPDATE cart SET updated_at = CURRENT_TIMESTAMP WHERE cart_id = %s",
-                        (cart_id,)
-                    )
-                
-                    conn.commit()
-            
-            return {
-                'success': True,
-                'message': message,
-                'cart_summary': self.get_cart_summary(cart_id)
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'message': f"Failed to add item: {str(e)}",
-                'cart_summary': None
-            }
-    
-    def remove_item(self, cart_id: str, item_name: str = None, 
-                    item_id: int = None, item_type: str = None) -> Dict:
-        """Remove item from cart"""
-        try:
+            # Extract data provided by Orchestrator
+            is_deal = 'deal_id' in item_data
+            item_id = item_data.get('deal_id') if is_deal else item_data.get('item_id')
+            item_type = 'deal' if is_deal else 'menu_item'
+            item_name = item_data.get('item_name')
+            price = item_data.get('price')
+
             with self.db.get_connection() as conn:
                 with conn.cursor() as cur:
-                    if item_name:
-                        # Remove by name 
-                        cur.execute("""
-                            DELETE FROM cart_items 
-                            WHERE cart_id = %s AND item_name ILIKE %s
-                        """, (cart_id, f"%{item_name}%"))
-                    else:
-                        # Remove by ID and type
-                        cur.execute("""
-                            DELETE FROM cart_items 
-                            WHERE cart_id = %s AND item_id = %s AND item_type = %s
-                        """, (cart_id, item_id, item_type))
-                    
-                    rows_affected = cur.rowcount
+                    # Upsert: Update quantity if exists, otherwise Insert
+                    cur.execute("""
+                        INSERT INTO cart_items 
+                        (cart_id, item_id, item_type, item_name, quantity, unit_price)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (cart_id, item_id, item_type) 
+                        DO UPDATE SET quantity = cart_items.quantity + %s
+                    """, (cart_id, item_id, item_type, item_name, quantity, price, quantity))
                     conn.commit()
             
-            if rows_affected > 0:
-                message = f"Removed {item_name or 'item'} from cart"
-            else:
-                message = "Item not found in cart"
-            
-            return {
-                'success': True,
-                'message': message,
-                'cart_summary': self.get_cart_summary(cart_id)
-            }
-            
+            return {'success': True, 'message': f"Added {quantity}x {item_name} to cart"}
         except Exception as e:
-            return {
-                'success': False,
-                'message': f"Failed to remove item: {str(e)}",
-                'cart_summary': None
-            }
-    
+            return {'success': False, 'message': str(e)}
+
+    def remove_item(self, cart_id: str, item_name: str) -> Dict:
+        """Removes an item from the database."""
+        with self.db.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    DELETE FROM cart_items 
+                    WHERE cart_id = %s AND item_name ILIKE %s
+                """, (cart_id, f"%{item_name}%"))
+                conn.commit()
+        return {'success': True, 'message': f"Removed {item_name}"}
+
     def get_cart_summary(self, cart_id: str) -> Dict:
-        """Get complete cart summary"""
+        """Returns the cart JSON summary."""
         with self.db.get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute("""
-                    SELECT * FROM cart_items 
-                    WHERE cart_id = %s
-                    ORDER BY item_name
-                """, (cart_id,))
+                cur.execute("SELECT * FROM cart_items WHERE cart_id = %s", (cart_id,))
+                items = cur.fetchall()
                 
-                items = []
-                total_price = 0
-                
-                for row in cur.fetchall():
-                    item_total = float(row['quantity'] * row['unit_price'])
-                    total_price += item_total
-                    
-                    items.append({
-                        'item_id': row['item_id'],
-                        'item_type': row['item_type'],
-                        'item_name': row['item_name'],
-                        'quantity': row['quantity'],
-                        'unit_price': float(row['unit_price']),
-                        'total_price': item_total,
-                        'special_requests': row['special_requests']
+                formatted = []
+                total = 0.0
+                for i in items:
+                    t_price = float(i['quantity']) * float(i['unit_price'])
+                    total += t_price
+                    formatted.append({
+                        "item_name": i['item_name'],
+                        "quantity": i['quantity'],
+                        "unit_price": float(i['unit_price']),
+                        "total_price": t_price,
+                        # Need these for Order Agent later:
+                        "item_id": i['item_id'], 
+                        "item_type": i['item_type']
                     })
+                
+                return {
+                    "success": True, 
+                    "items": formatted, 
+                    "total_price": total,
+                    "is_empty": len(items) == 0
+                }
+
+    def place_order(self, cart_id: str) -> Dict:
+        """Finalizes the cart."""
+        summary = self.get_cart_summary(cart_id)
+        if summary['is_empty']:
+            return {'success': False, 'message': "Cart is empty"}
+            
+        # Clear the cart items in DB
+        with self.db.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM cart_items WHERE cart_id = %s", (cart_id,))
+                cur.execute("UPDATE cart SET status = 'inactive' WHERE cart_id = %s", (cart_id,))
+                conn.commit()
         
         return {
-            'cart_id': cart_id,
-            'items': items,
-            'total_items': sum(item['quantity'] for item in items),
-            'total_price': total_price,
-            'is_empty': len(items) == 0
+            'success': True, 
+            'message': "Order placed", 
+            'order_data': summary # Send this data to Order Agent
         }
-    
-    def clear_cart(self, cart_id: str) -> Dict:
-        """Clear all items from cart"""
-        try:
-            with self.db.get_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("DELETE FROM cart_items WHERE cart_id = %s", (cart_id,))
-                    conn.commit()
-            
-            return {
-                'success': True,
-                'message': "Cart cleared successfully",
-                'cart_summary': self.get_cart_summary(cart_id)
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'message': f"Failed to clear cart: {str(e)}",
-                'cart_summary': None
-            }
-    
-    def place_order(self, cart_id: str) -> Dict:
-        """
-        Marks the cart as inactive and clears the items from cart_items table.
-        """
-        try:
-            cart_summary = self.get_cart_summary(cart_id)
-            
-            if cart_summary['is_empty']:
-                return {
-                    'success': False,
-                    'message': "Cannot place order - your cart is empty.",
-                    'order_data': None
-                }
-            
-            with self.db.get_connection() as conn:
-                with conn.cursor() as cur:
-                    # 1. Mark the cart as inactive
-                    cur.execute("""
-                        UPDATE cart 
-                        SET status = 'inactive', 
-                            updated_at = CURRENT_TIMESTAMP 
-                        WHERE cart_id = %s
-                    """, (cart_id,))
-                    
-                    # 2. Delete the items from the active cart_items table.
-                    cur.execute("""
-                        DELETE FROM cart_items 
-                        WHERE cart_id = %s
-                    """, (cart_id,))
-                    
-                    conn.commit()
-            
-            return {
-                'success': True,
-                'message': "Cart successfully converted to an order.",
-                'order_data': cart_summary # Pass data to the OrderAgent
-            }
-            
-        except Exception as e:
-            return {
-                'success': False,
-                'message': f"Cart Agent failed to finalize cart: {str(e)}",
-                'order_data': None
-            }
-
-    def _extract_quantity(self, text: str) -> int:
-        """Extract quantity from user input"""
-        numbers = re.findall(r'\d+', text)
-        if numbers: return int(numbers[0])
-        text_numbers = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5}
-        for word, num in text_numbers.items():
-            if word in text: return num
-        return 1
-
-    def _extract_special_requests(self, text: str) -> Optional[str]:
-        """Extract special requests from user input"""
-        patterns = [r"with (.+)", r"no (.+)", r"extra (.+)", r"less (.+)"]
-        for pattern in patterns:
-            match = re.search(pattern, text)
-            if match: return match.group(1).strip()
-        return None
-
-    def _extract_item_name(self, text: str, exclude_words: List[str]) -> str:
-        """Extract item name from text"""
-        words = text.split()
-        filtered_words = [word for word in words if word not in exclude_words + ['from', 'the', 'my', 'cart']]
-        return ' '.join(filtered_words)
 
 
-# --- NEW AGENT LISTENER SECTION ---
+# --- MAIN LISTENER LOOP (No LLM needed here!) ---
 
 def run_cart_agent():
-    print("🛒 Cart Agent is running and listening for tasks...")
+    print("🛒 Cart Agent (Database Backed) is running...")
     
-    # Instantiate the agent's logic
-    cart_agent_logic = CartAgent()
+    # Initialize our Tools class
+    tools = CartTools()
     
-    # Get Redis connection
+    # Connect to Redis
     redis_conn = RedisConnection.get_instance()
-    if not redis_conn:
-        print("FATAL: Could not connect to Redis. Cart Agent shutting down.")
-        return
-        
-    # Subscribe to the channel where tasks are published
     pubsub = redis_conn.pubsub()
     pubsub.subscribe(AGENT_TASKS_CHANNEL)
-    
+
     for message in pubsub.listen():
         if message['type'] == 'message':
             try:
-                # Decode the message data from JSON
-                task_data = json.loads(message['data'])
+                data = json.loads(message['data'])
                 
-                # Check if the task is for this agent
-                if task_data.get('agent') == 'cart':
-                    command = task_data.get('command')
-                    payload = task_data.get('payload', {})
-                    response_channel = task_data.get('response_channel')
-                    
-                    print(f"Cart Agent: Received command '{command}'")
-                    
-                    result = {}
-                    # Execute the command by calling the class method
-                    if command == 'add_item':
-                        result = cart_agent_logic.add_item(**payload)
-                    elif command == 'remove_item':
-                        result = cart_agent_logic.remove_item(**payload)
-                    elif command == 'get_cart_summary':
-                        result = cart_agent_logic.get_cart_summary(**payload)
-                    elif command == 'clear_cart':
-                        result = cart_agent_logic.clear_cart(**payload)
-                    elif command == 'place_order':
-                        result = cart_agent_logic.place_order(**payload)
-                    elif command == 'create_cart':
-                        cart_id = cart_agent_logic.create_cart(**payload)
-                        result = {'success': True, 'cart_id': cart_id}
-                    else:
-                        result = {'success': False, 'message': f"Unknown command: {command}"}
-                        
-                    # Publish the result back to the orchestrator's private channel
-                    if response_channel:
-                        print(f"🟢 Cart Agent publishing response to {response_channel}")
-                        redis_conn.publish(response_channel, json.dumps(result))
-                        
-            except json.JSONDecodeError:
-                print("Cart Agent: Error decoding JSON message.")
-            except Exception as e:
-                print(f"Cart Agent: An error occurred: {e}")
+                # 1. Check if the task is for US
+                if data.get('agent') != 'cart':
+                    continue
 
+                command = data.get('command')
+                payload = data.get('payload', {})
+                response_channel = data.get('response_channel')
+                
+                print(f"📥 Received Command: {command}")
+
+                # 2. Map the Command String to the Class Method (The "Tool")
+                result = {}
+                
+                if command == 'create_cart':
+                    result = tools.create_cart(payload.get('user_id'))
+                
+                elif command == 'add_item':
+                    # Ensure args match Orchestrator payload
+                    result = tools.add_item(
+                        payload.get('cart_id'),
+                        payload.get('item_data'),
+                        payload.get('quantity', 1)
+                    )
+                
+                elif command == 'remove_item':
+                    result = tools.remove_item(
+                        payload.get('cart_id'), 
+                        payload.get('item_name')
+                    )
+                
+                elif command == 'get_cart_summary':
+                    result = tools.get_cart_summary(payload.get('cart_id'))
+                
+                elif command == 'place_order':
+                    result = tools.place_order(payload.get('cart_id'))
+                
+                else:
+                    result = {'success': False, 'message': f"Unknown tool: {command}"}
+
+                # 3. Send Result Back
+                if response_channel:
+                    redis_conn.publish(response_channel, json.dumps(result))
+
+            except Exception as e:
+                print(f"❌ Error in Cart Agent: {e}")
 
 if __name__ == "__main__":
     run_cart_agent()
