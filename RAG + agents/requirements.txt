@@ -1,0 +1,11 @@
+streamlit
+psycopg2-binary
+sqlalchemy
+openai
+langchain
+faiss-cpu
+python-dotenv
+numpy
+redis
+requests
+tiktoken
