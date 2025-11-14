@@ -1,60 +1,70 @@
-# chat_agent.py
-
-from openai import OpenAI
-import os
+﻿import os
 from dotenv import load_dotenv
+from langchain_groq import ChatGroq
+from langchain_core.tools import tool
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from search_agent import SearchAgent
+from rag_retriever import RAGRetriever
 
 load_dotenv()
-_api = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Define the "tools"
+# Initialize the LLM
+llm = ChatGroq(model="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+
+# --- 1. SEARCH TOOLS ---
+@tool
+def search_menu(query: str) -> str:
+    """Search for specific menu items by name to get their price and details."""
+    sa = SearchAgent()
+    return str(sa.search(query))
+
+@tool
+def retrieve_menu_context(query: str) -> str:
+    """Retrieve general menu information using RAG."""
+    rag = RAGRetriever()
+    return rag.search(query, k=5)
+
+@tool
+def get_menu_blocks() -> str:
+    """Get the raw text blocks of the menu."""
+    sa = SearchAgent()
+    return sa.get_context_blocks()
+
+# --- 2. CART TOOLS (The "Interface") ---
+@tool
+def add_to_cart(item_name: str, quantity: int = 1) -> str:
+    """Add an item to the shopping cart. Input: item_name (string), quantity (int)."""
+    return "success"
+
+@tool
+def remove_from_cart(item_name: str) -> str:
+    """Remove an item from the shopping cart. Input: item_name (string)."""
+    return "success"
+
+@tool
+def show_cart() -> str:
+    """Display the current items in the shopping cart."""
+    return "success"
+
+@tool
+def place_order() -> str:
+    """Place the final order and checkout."""
+    return "success"
+
+# --- 3. BIND TOOLS ---
 tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "add_to_cart",
-            "description": "Adds an item to the user's shopping cart.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "item_name": {"type": "string", "description": "The name of the menu item or deal to add."},
-                    "quantity": {"type": "integer", "description": "The number of items to add."},
-                },
-                "required": ["item_name", "quantity"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "remove_from_cart",
-            "description": "Removes an item from the user's shopping cart.",
-            "parameters": {
-                "type": "object",
-                "properties": {"item_name": {"type": "string", "description": "The name of the item to remove."}},
-                "required": ["item_name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "show_cart",
-            "description": "Shows the current contents of the user's shopping cart.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "place_order",
-            "description": "Finalizes the user's order.",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    },
+    search_menu, 
+    retrieve_menu_context, 
+    get_menu_blocks,
+    add_to_cart,
+    remove_from_cart,
+    show_cart,
+    place_order
 ]
 
-# PROMPT : FOR THE "CONVERSATIONAL" BRAIN
+llm_with_tools = llm.bind_tools(tools)
+
+# --- 4. SYSTEM PROMPT (The Brain) ---
 SYSTEM_PROMPT = """
 You are an experienced, friendly, and attentive restaurant waiter AI assistant for a multi-cuisine restaurant serving Fast Food, Chinese, Pakistani/Desi, and BBQ. Your role is to help customers explore the menu, recommend dishes, and provide details about deals.
 
@@ -121,20 +131,40 @@ AI: "Our Szechuan Beef is a single-serving dish with a high spice level. If you 
 - Keep responses consistent, appetizing, and informative
 - Use conversation context for follow-up questions and references
 - Provide the best suggestions balancing individual items and deals
+
+Rules:
+**Tools:** - If the user wants to buy something, call the 'add_to_cart' tool.
+   - If the user wants to check their cart, call 'show_cart'.
+   - If the user is done, call 'place_order'.
+**Tone:** Be concise, warm, and helpful.
+
+MENU CONTEXT (Use this to answer):
+{menu_context}
 """
 
-def get_ai_response(user_input: str, conversation_history: list, menu_context: str):
-    full_prompt = f"{SYSTEM_PROMPT}\n\n## MENU CONTEXT:\n{menu_context}"
-    
-    messages = [{"role": "system", "content": full_prompt}]
-    messages.extend(conversation_history)
-    messages.append({"role": "user", "content": user_input})
+prompt = ChatPromptTemplate.from_messages([
+    ("system", SYSTEM_PROMPT),
+    MessagesPlaceholder(variable_name="chat_history"),
+    ("human", "{input}"),
+])
 
-    response = _api.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=messages,
-        tools=tools,
-        tool_choice="auto",  
-    )
-    
-    return response.choices[0].message
+# Create the chain
+chain = prompt | llm_with_tools
+
+def get_ai_response(user_input: str, conversation_history: list, menu_context: str = ""):
+    """
+    Generates a response. Returns the raw AIMessage object.
+    """
+    try:
+        # FIX: We now pass 'menu_context' into the chain!
+        response = chain.invoke({
+            "input": user_input, 
+            "chat_history": conversation_history,
+            "menu_context": menu_context 
+        })
+        
+        return response
+        
+    except Exception as e:
+        from langchain_core.messages import AIMessage
+        return AIMessage(content=f"Sorry, I encountered an error: {str(e)}")

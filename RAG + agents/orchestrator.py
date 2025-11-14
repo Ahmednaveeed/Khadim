@@ -206,8 +206,8 @@ if submitted and user_input:
     # Handle tool calls
     if ai_message.tool_calls:
         tool_call = ai_message.tool_calls[0]
-        function_name = tool_call.function.name
-        args = json.loads(tool_call.function.arguments)
+        function_name = tool_call["name"]  # Access as dictionary key
+        args = tool_call["args"]
 
         # --- ADD TO CART ---
         if function_name == "add_to_cart":
