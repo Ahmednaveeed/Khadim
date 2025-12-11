@@ -15,8 +15,9 @@ class UpsellAgent:
     """
     Weather-based upsell agent.
 
-    Uses OpenWeather API + menu_item table to recommend items
+    Uses OpenWeather API + direct database queries to recommend snacks/sides/drinks
     based on current weather (hot / cold / rainy / mild).
+    Only suggests snack-type items - no main dishes or breads.
     """
 
     def __init__(self):
@@ -87,123 +88,127 @@ class UpsellAgent:
             }
 
     # ---------------------------------------------------------
-    # UTILITY: DB QUERY HANDLER
+    # DATABASE QUERY HELPER
     # ---------------------------------------------------------
-    def _fetch_items(self, sql: str, params=None):
-        params = params or ()
+    def _fetch_items(self, sql: str):
+        """Execute SQL and return list of item dictionaries with full details."""
         results = []
 
         with self.db.get_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, params)
+                cur.execute(sql)
                 rows = cur.fetchall() or []
 
-            # If no rows, return empty list early
                 if not rows:
                     return []
 
                 colnames = [desc[0] for desc in cur.description]
-       
-       
-        for row in rows:
-            row_dict = {colnames[i]: row[i] for i in range(len(colnames))}
 
-            results.append({
-                "item_id": row_dict.get("item_id"),
-                "item_name": row_dict.get("item_name"),
-                "item_price": float(row_dict.get("item_price")) if row_dict.get("item_price") else None,
-                "item_category": row_dict.get("item_category"),
-                "item_cuisine": row_dict.get("item_cuisine"),
-            })
+                for row in rows:
+                    row_dict = {colnames[i]: row[i] for i in range(len(colnames))}
+                    results.append({
+                        "item_id": row_dict.get("item_id"),
+                        "item_name": row_dict.get("item_name"),
+                        "item_description": row_dict.get("item_description"),
+                        "item_price": float(row_dict.get("item_price")) if row_dict.get("item_price") else None,
+                        "item_category": row_dict.get("item_category"),
+                        "item_cuisine": row_dict.get("item_cuisine"),
+                    })
 
         return results
+
     # ---------------------------------------------------------
-    # CATEGORY: COLD
+    # WEATHER-BASED RECOMMENDATIONS (snacks/sides/drinks only - NO breads)
     # ---------------------------------------------------------
     def recommend_for_cold(self):
         """
-        Cold weather → hot drinks, soups, desi items.
+        Cold weather → hot drinks and warm snacks/starters.
+        Items: Chai, Green Tea, Hot and Sour Soup, Samosa Platter, etc.
         """
         sql = """
-            SELECT item_id, item_name, item_price, item_category, item_cuisine
+            SELECT item_id, item_name, item_description, item_price, item_category, item_cuisine
             FROM menu_item
             WHERE availability = TRUE
+              AND item_category IN ('drink', 'starter', 'side')
+              AND item_category != 'bread'
               AND (
                     'hot' = ANY(tags)
-                 OR 'soup' = ANY(tags)
+                 OR item_name ILIKE '%chai%'
+                 OR item_name ILIKE '%tea%'
                  OR item_name ILIKE '%soup%'
-                 OR item_name ILIKE '%karahi%'
-                 OR item_name ILIKE '%handi%'
-                 OR item_name ILIKE '%nihari%'
+                 OR item_name ILIKE '%samosa%'
               )
             ORDER BY item_price ASC
-            LIMIT 10;
+            LIMIT 6;
         """
         return self._fetch_items(sql)
 
-    # ---------------------------------------------------------
-    # CATEGORY: HOT
-    # ---------------------------------------------------------
     def recommend_for_hot(self):
         """
-        Hot weather → cold drinks & refreshing items.
+        Hot weather → cold drinks and refreshing items (excluding plain water).
+        Items: Cola, Lemonade, Mint Margarita, Iced Coffee, Shakes, Juice, etc.
         """
         sql = """
-            SELECT item_id, item_name, item_price, item_category, item_cuisine
+            SELECT item_id, item_name, item_description, item_price, item_category, item_cuisine
             FROM menu_item
             WHERE availability = TRUE
+              AND item_category = 'drink'
+              AND item_name NOT ILIKE '%water%'
               AND (
                     'cold' = ANY(tags)
-                 OR 'seasonal_summer' = ANY(tags)
-                 OR item_cuisine = 'Drinks'
+                 OR item_name ILIKE '%cola%'
+                 OR item_name ILIKE '%lemonade%'
+                 OR item_name ILIKE '%margarita%'
+                 OR item_name ILIKE '%iced%'
+                 OR item_name ILIKE '%shake%'
+                 OR item_name ILIKE '%juice%'
               )
             ORDER BY item_price ASC
-            LIMIT 10;
+            LIMIT 6;
         """
         return self._fetch_items(sql)
 
-    # ---------------------------------------------------------
-    # CATEGORY: RAIN
-    # ---------------------------------------------------------
     def recommend_for_rain(self):
         """
-        Rainy weather → fries, burgers, snacks, soup.
+        Rainy weather → fried snacks and comfort sides.
+        Items: Fries, Samosa, Spring Rolls, Onion Rings, Nuggets, etc.
         """
         sql = """
-            SELECT item_id, item_name, item_price, item_category, item_cuisine
+            SELECT item_id, item_name, item_description, item_price, item_category, item_cuisine
             FROM menu_item
             WHERE availability = TRUE
+              AND item_category IN ('starter', 'side')
+              AND item_category != 'bread'
               AND (
                     'fries' = ANY(tags)
-                 OR 'burger' = ANY(tags)
                  OR 'snack' = ANY(tags)
                  OR item_name ILIKE '%fries%'
-                 OR item_name ILIKE '%burger%'
                  OR item_name ILIKE '%samosa%'
-                 OR item_name ILIKE '%soup%'
+                 OR item_name ILIKE '%spring roll%'
+                 OR item_name ILIKE '%onion ring%'
+                 OR item_name ILIKE '%nugget%'
+                 OR item_name ILIKE '%chaat%'
+                 OR item_name ILIKE '%cracker%'
               )
             ORDER BY item_price ASC
-            LIMIT 10;
+            LIMIT 6;
         """
         return self._fetch_items(sql)
 
-    # ---------------------------------------------------------
-    # CATEGORY: MILD
-    # ---------------------------------------------------------
     def recommend_for_mild(self):
         """
-        Mild weather → mix of popular items.
+        Mild weather → mix of popular snacks and drinks (no breads, no plain water).
+        Items: Various sides, starters, and drinks.
         """
         sql = """
-            SELECT item_id, item_name, item_price, item_category, item_cuisine
+            SELECT item_id, item_name, item_description, item_price, item_category, item_cuisine
             FROM menu_item
             WHERE availability = TRUE
-              AND (
-                    'all_year' = ANY(tags)
-                 OR item_cuisine IN ('Fast Food','Chinese','Desi')
-              )
+              AND item_category IN ('drink', 'starter', 'side')
+              AND item_category != 'bread'
+              AND item_name NOT ILIKE '%water%'
             ORDER BY item_price ASC
-            LIMIT 10;
+            LIMIT 6;
         """
         return self._fetch_items(sql)
 

@@ -2,11 +2,13 @@ import os
 import pandas as pd
 from sqlalchemy import create_engine
 from dotenv import load_dotenv
+from database_connection import DatabaseConnection
 
 # Load environment variables
 load_dotenv()
 db_url = os.getenv("DATABASE_URL")
 engine = create_engine(db_url)
+db_instance = DatabaseConnection.get_instance()
 
 def format_menu_item(row):
     text = f"Menu Item: {row.item_name}"
@@ -59,7 +61,6 @@ def load_texts():
         ORDER BY mi.item_id;
         """
         
-        # --- query to calculate prep time for deals ---
         deal_query = """
         SELECT
           d.deal_id,
@@ -90,6 +91,33 @@ class SearchAgent:
     """Simple Search Agent for matching menu items and deals"""
     def __init__(self):
         self.blocks = load_texts()
+        self.db = DatabaseConnection.get_instance()
+    
+    def _get_real_item_id(self, item_name: str) -> int:
+        """Get the actual database ID for a menu item by name."""
+        try:
+            with self.db.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT item_id FROM menu_item WHERE item_name ILIKE %s LIMIT 1", (item_name,))
+                    row = cur.fetchone()
+                    if row:
+                        return row[0] if isinstance(row, tuple) else row['item_id']
+        except Exception as e:
+            print(f"[SearchAgent] Error fetching real ID for '{item_name}': {e}")
+        return None
+    
+    def _get_real_deal_id(self, deal_name: str) -> int:
+        """Get the actual database ID for a deal by name."""
+        try:
+            with self.db.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT deal_id FROM deal WHERE deal_name ILIKE %s LIMIT 1", (deal_name,))
+                    row = cur.fetchone()
+                    if row:
+                        return row[0] if isinstance(row, tuple) else row['deal_id']
+        except Exception as e:
+            print(f"[SearchAgent] Error fetching real deal ID for '{deal_name}': {e}")
+        return None
 
     def search(self, term: str):
         """Search for menu items or deals matching the given term"""
@@ -99,23 +127,46 @@ class SearchAgent:
             if term_lower in block.lower():
                 lines = block.splitlines()
                 entry = {"raw": block}
+                
+                # Initialize fields to ensure they exist
+                entry["item_category"] = ""
+                entry["item_cuisine"] = ""
+                
                 name_line = lines[0]
+                
+                # Extract Name & Type
                 if "Menu Item:" in name_line:
                     entry["type"] = "menu_item"
                     entry["item_name"] = name_line.split(":", 1)[1].strip()
-                    entry["item_id"] = abs(hash(entry["item_name"])) % 1000
+                    # Fetch REAL ID from database
+                    real_id = self._get_real_item_id(entry["item_name"])
+                    entry["item_id"] = real_id if real_id else None
                 elif "Deal:" in name_line:
                     entry["type"] = "deal"
                     entry["item_name"] = name_line.split(":", 1)[1].strip()
-                    entry["deal_id"] = abs(hash(entry["item_name"])) % 1000
+                    # Fetch REAL ID from database
+                    real_id = self._get_real_deal_id(entry["item_name"])
+                    entry["deal_id"] = real_id if real_id else None
+
                 price = 0.0
+                
+                # Parse the rest of the lines
                 for ln in lines:
+                    val = ""
+                    if ":" in ln:
+                        val = ln.split(":", 1)[1].strip()
+                        
                     if ln.lower().startswith("price:"):
                         try:
-                            price = float(ln.split(":", 1)[1].strip())
+                            price = float(val)
                         except:
                             pass
-                        break
+                    # --- ADDED PARSING LOGIC HERE ---
+                    elif ln.lower().startswith("category:"):
+                        entry["item_category"] = val
+                    elif ln.lower().startswith("cuisine:"):
+                        entry["item_cuisine"] = val
+                
                 entry["price"] = price
                 hits.append(entry)
         return hits
@@ -127,12 +178,12 @@ class SearchAgent:
 
 if __name__ == "__main__":
     texts = load_texts()
-    print("Loaded", len(texts), "text blocks for menu and deals.\n")
-    if texts:
-        print("--- Sample Menu Item Text Block ---")
-        print(texts[0], "\n")
-        
-        # Find a deal to print as a sample
-        deal_sample = next((text for text in texts if text.startswith("Deal:")), "No deals found.")
-        print("--- Sample Deal Text Block ---")
-        print(deal_sample, "\n")
+    print("Loaded", len(texts), "text blocks.\n")
+    agent = SearchAgent()
+    print("Testing search for 'karahi'...")
+    results = agent.search("karahi")
+    if results:
+        print(f"Found: {results[0]['item_name']}")
+        print(f"Category: {results[0].get('item_category')}") # Should print 'main'
+    else:
+        print("Nothing found.")

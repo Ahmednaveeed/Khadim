@@ -1,5 +1,5 @@
 ----------------------
--- NUKING OLD TABLES (for safe re-running)
+-- Deleting OLD TABLES 
 ----------------------
 DROP TABLE IF EXISTS deal_item CASCADE;
 DROP TABLE IF EXISTS menu_item_chefs CASCADE;
