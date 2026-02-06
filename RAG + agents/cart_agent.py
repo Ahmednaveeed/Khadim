@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from database_connection import DatabaseConnection
 from redis_connection import RedisConnection
 from config import AGENT_TASKS_CHANNEL
+from redis_lock import get_lock_manager, get_idempotency_manager
 
 load_dotenv()
 
@@ -17,10 +18,16 @@ class CartTools:
     This class holds the 'Tools' (Functions) for the Cart Agent.
     Instead of using @tool (which is for AI), we define them as class methods 
     backed by the Database.
+    
+    Now includes:
+    - Distributed locking for concurrent access protection
+    - Idempotency checks to prevent duplicate operations
     """
     
     def __init__(self):
         self.db = DatabaseConnection.get_instance()
+        self.lock_manager = get_lock_manager()
+        self.idempotency = get_idempotency_manager()
         self._init_tables()
     
     def _init_tables(self):
@@ -59,8 +66,29 @@ class CartTools:
                 conn.commit()
         return {'success': True, 'cart_id': cart_id, 'message': "Cart created"}
 
-    def add_item(self, cart_id: str, item_data: Dict, quantity: int = 1) -> Dict:
-        """Adds an item to the database."""
+    def add_item(self, cart_id: str, item_data: Dict, quantity: int = 1, idempotency_key: str = None) -> Dict:
+        """
+        Adds an item to the database.
+        
+        Now with:
+        - Distributed locking to prevent race conditions
+        - Idempotency to prevent duplicate additions
+        """
+        # Check for duplicate request
+        if idempotency_key:
+            cached = self.idempotency.check_and_get_cached(idempotency_key)
+            if cached:
+                cached["duplicate"] = True
+                return cached
+        
+        # Acquire cart lock
+        if not self.lock_manager.acquire_cart_lock(cart_id, timeout=5):
+            return {
+                'success': False, 
+                'message': "Cart is being modified by another operation. Please try again.",
+                'error_code': 'CART_LOCKED'
+            }
+        
         try:
             self.create_cart(cart_id) # Ensure cart exists
             
@@ -83,26 +111,67 @@ class CartTools:
                     """, (cart_id, item_id, item_type, item_name, quantity, price, quantity))
                     conn.commit()
             
-            return {'success': True, 'message': f"Added {quantity}x {item_name} to cart"}
+            result = {'success': True, 'message': f"Added {quantity}x {item_name} to cart"}
+            
+            # Cache result for idempotency
+            if idempotency_key:
+                self.idempotency.cache_result(idempotency_key, result)
+            
+            return result
+            
         except Exception as e:
             return {'success': False, 'message': str(e)}
-
-    def remove_item(self, cart_id: str, item_name: str) -> Dict:
-        """Removes an item from the database."""
-        rows_deleted = 0
-        with self.db.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("""
-                    DELETE FROM cart_items 
-                    WHERE cart_id = %s AND item_name ILIKE %s
-                """, (cart_id, f"%{item_name}%"))
-                rows_deleted = cur.rowcount
-                conn.commit()
         
-        if rows_deleted > 0:
-            return {'success': True, 'message': f"Removed {item_name}"}
-        else:
-            return {'success': False, 'message': f"Item '{item_name}' not found in your cart."}
+        finally:
+            # Always release the lock
+            self.lock_manager.release_cart_lock(cart_id)
+
+    def remove_item(self, cart_id: str, item_name: str, idempotency_key: str = None) -> Dict:
+        """
+        Removes an item from the database.
+        
+        Now with distributed locking.
+        """
+        # Check for duplicate request
+        if idempotency_key:
+            cached = self.idempotency.check_and_get_cached(idempotency_key)
+            if cached:
+                cached["duplicate"] = True
+                return cached
+        
+        # Acquire cart lock
+        if not self.lock_manager.acquire_cart_lock(cart_id, timeout=5):
+            return {
+                'success': False, 
+                'message': "Cart is being modified by another operation. Please try again.",
+                'error_code': 'CART_LOCKED'
+            }
+        
+        try:
+            rows_deleted = 0
+            with self.db.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        DELETE FROM cart_items 
+                        WHERE cart_id = %s AND item_name ILIKE %s
+                    """, (cart_id, f"%{item_name}%"))
+                    rows_deleted = cur.rowcount
+                    conn.commit()
+            
+            if rows_deleted > 0:
+                result = {'success': True, 'message': f"Removed {item_name}"}
+            else:
+                result = {'success': False, 'message': f"Item '{item_name}' not found in your cart."}
+            
+            # Cache result for idempotency
+            if idempotency_key:
+                self.idempotency.cache_result(idempotency_key, result)
+            
+            return result
+            
+        finally:
+            # Always release the lock
+            self.lock_manager.release_cart_lock(cart_id)
 
     def get_cart_summary(self, cart_id: str) -> Dict:
         """Returns the cart JSON summary."""
@@ -132,24 +201,55 @@ class CartTools:
                     "is_empty": len(items) == 0
                 }
 
-    def place_order(self, cart_id: str) -> Dict:
-        """Finalizes the cart."""
-        summary = self.get_cart_summary(cart_id)
-        if summary['is_empty']:
-            return {'success': False, 'message': "Cart is empty"}
-            
-        # Clear the cart items in DB
-        with self.db.get_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute("DELETE FROM cart_items WHERE cart_id = %s", (cart_id,))
-                cur.execute("UPDATE cart SET status = 'inactive' WHERE cart_id = %s", (cart_id,))
-                conn.commit()
+    def place_order(self, cart_id: str, idempotency_key: str = None) -> Dict:
+        """
+        Finalizes the cart.
         
-        return {
-            'success': True, 
-            'message': "Order placed", 
-            'order_data': summary # Send this data to Order Agent
-        }
+        Note: Full atomic order flow with rollback is handled by OrderCoordinator.
+        This method just handles the cart side atomically.
+        """
+        # Check for duplicate request
+        if idempotency_key:
+            cached = self.idempotency.check_and_get_cached(idempotency_key)
+            if cached:
+                cached["duplicate"] = True
+                return cached
+        
+        # Acquire cart lock for finalization
+        if not self.lock_manager.acquire_cart_lock(cart_id, timeout=10):
+            return {
+                'success': False, 
+                'message': "Cart is being modified by another operation. Please try again.",
+                'error_code': 'CART_LOCKED'
+            }
+        
+        try:
+            summary = self.get_cart_summary(cart_id)
+            if summary['is_empty']:
+                return {'success': False, 'message': "Cart is empty"}
+                
+            # Clear the cart items in DB - atomic operation
+            with self.db.get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("DELETE FROM cart_items WHERE cart_id = %s", (cart_id,))
+                    cur.execute("UPDATE cart SET status = 'inactive' WHERE cart_id = %s", (cart_id,))
+                    conn.commit()
+            
+            result = {
+                'success': True, 
+                'message': "Order placed", 
+                'order_data': summary
+            }
+            
+            # Cache result for idempotency
+            if idempotency_key:
+                self.idempotency.cache_result(idempotency_key, result)
+            
+            return result
+            
+        finally:
+            # Always release the lock
+            self.lock_manager.release_cart_lock(cart_id)
 
 
 # --- MAIN LISTENER LOOP (No LLM needed here!) ---

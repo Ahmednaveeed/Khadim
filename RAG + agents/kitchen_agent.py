@@ -8,8 +8,12 @@ from dotenv import load_dotenv
 
 from config import AGENT_TASKS_CHANNEL
 from database_connection import DatabaseConnection
+from redis_lock import get_lock_manager
 
 load_dotenv()
+
+# Get lock manager for chef assignment
+lock_manager = get_lock_manager()
 
 # =========================================================
 #   ALLOWED STATUS TRANSITIONS (STRICT WORKFLOW)
@@ -109,7 +113,8 @@ def fetch_chefs_for_item(item_id):
             c.cheff_id,
             c.cheff_name,
             c.specialty,
-            c.active_status
+            c.active_status,
+            c.max_current_orders
         FROM chef c
         JOIN menu_item_chefs mic ON mic.chef_id = c.cheff_id
         WHERE mic.menu_item_id = %s
@@ -120,6 +125,92 @@ def fetch_chefs_for_item(item_id):
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, (item_id,))
             return cur.fetchall() or []
+
+
+def get_chef_current_load():
+    """
+    Get the current number of active tasks (QUEUED or IN_PROGRESS) for each chef.
+    Returns a dictionary: {chef_name: current_task_count}
+    """
+    sql = """
+        SELECT assigned_chef, COUNT(*) as task_count
+        FROM kitchen_tasks
+        WHERE status IN ('QUEUED', 'IN_PROGRESS')
+        GROUP BY assigned_chef
+    """
+    db = get_db_instance()
+    with db.get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(sql)
+            rows = cur.fetchall()
+            return {row["assigned_chef"]: row["task_count"] for row in rows}
+
+
+def select_best_chef(chef_list, chef_load, pending_assignments):
+    """
+    Select the best chef based on load balancing with conflict detection.
+    
+    Uses distributed locking to prevent competing chef assignments when
+    multiple orders are being processed simultaneously.
+    
+    Args:
+        chef_list: List of available chefs for this item
+        chef_load: Dictionary of current task counts from DB {chef_name: count}
+        pending_assignments: Dictionary tracking assignments within this order {chef_name: count}
+    
+    Returns:
+        The chef_name with the lowest combined load, or "UNASSIGNED" if all chefs are at max capacity
+    """
+    if not chef_list:
+        return "UNASSIGNED"
+    
+    best_chef = None
+    min_load = float('inf')
+    locked_chef = None
+    
+    # Sort chefs by load to try least loaded first
+    sorted_chefs = sorted(
+        chef_list, 
+        key=lambda c: chef_load.get(c["cheff_name"], 0) + pending_assignments.get(c["cheff_name"], 0)
+    )
+    
+    for chef in sorted_chefs:
+        chef_name = chef["cheff_name"]
+        max_orders = chef.get("max_current_orders") or 10  # Default to 10 if not set
+        
+        # Calculate total load: DB load + pending assignments in this order
+        current_db_load = chef_load.get(chef_name, 0)
+        pending_load = pending_assignments.get(chef_name, 0)
+        total_load = current_db_load + pending_load
+        
+        # Skip if chef is at or over max capacity
+        if total_load >= max_orders:
+            print(f"[DEBUG KITCHEN] Chef {chef_name} at max capacity ({total_load}/{max_orders})")
+            continue
+        
+        # Try to acquire a brief lock on this chef to prevent race conditions
+        if lock_manager.acquire_chef_lock(chef_name, timeout=2):
+            locked_chef = chef_name
+            best_chef = chef_name
+            min_load = total_load
+            print(f"[DEBUG KITCHEN] Selected chef: {best_chef} (load: {min_load}) [locked]")
+            break
+        else:
+            # Chef is being assigned by another process, try next
+            print(f"[DEBUG KITCHEN] Chef {chef_name} locked by another process, trying next...")
+            continue
+    
+    # Release the chef lock after assignment is recorded
+    if locked_chef:
+        lock_manager.release_chef_lock(locked_chef)
+    
+    if best_chef:
+        return best_chef
+    else:
+        # All chefs at capacity or locked, pick the one with lowest load anyway
+        best_chef = min(chef_list, key=lambda c: chef_load.get(c["cheff_name"], 0) + pending_assignments.get(c["cheff_name"], 0))
+        print(f"[DEBUG KITCHEN] All chefs at capacity/locked, assigning to {best_chef['cheff_name']}")
+        return best_chef["cheff_name"]
 
 # =========================================================
 #   STATION LOGIC
@@ -150,10 +241,15 @@ def plan_order(payload):
     items = payload.get("items", [])
 
     tasks = []
-    chef_load = {}
-    chef_tasks = {}
     cached_chefs = {}
     task_counter = 1
+    
+    # Get current chef workloads from DB
+    chef_load = get_chef_current_load()
+    print(f"[DEBUG KITCHEN] Current chef loads: {chef_load}")
+    
+    # Track pending assignments within this order (for multi-item orders)
+    pending_assignments = {}
 
     for entry in items:
         item_id = entry.get("menu_item_id")
@@ -165,7 +261,7 @@ def plan_order(payload):
             print(f"[DEBUG KITCHEN] ❌ ERROR: Item {item_id} returns None from DB. Check your menu_item table!")
             continue 
             
-        # 2. Assign Chef
+        # 2. Assign Chef using load balancing
         item_name = item.get("item_name")
         category = item.get("item_category")
         cuisine = item.get("item_cuisine")
@@ -178,11 +274,11 @@ def plan_order(payload):
         
         chef_list = cached_chefs[item_id]
         
-        if not chef_list:
-             assigned_chef = "UNASSIGNED"
-        else:
-             # Simple assignment
-             assigned_chef = chef_list[0]["cheff_name"]
+        # Use load-balanced chef selection
+        assigned_chef = select_best_chef(chef_list, chef_load, pending_assignments)
+        
+        # Track this assignment for subsequent items in the same order
+        pending_assignments[assigned_chef] = pending_assignments.get(assigned_chef, 0) + 1
 
         task_id = f"{order_id}-{task_counter}"
         task_data = {
