@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
 import 'home_screen.dart';
 import 'menu_screen.dart';
 import 'offer_screen.dart';
 import 'profile_screen.dart';
+import 'chat_bottom_sheet.dart';
+import '../providers/cart_provider.dart';
+import 'cart_screen.dart';
 
 class MainScreen extends StatefulWidget {
   const MainScreen({Key? key}) : super(key: key);
@@ -28,6 +33,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final cart = Provider.of<CartProvider>(context);
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -43,6 +49,9 @@ class _MainScreenState extends State<MainScreen> {
         child: _screens[_currentIndex],
       ),
 
+      // --------------------------
+      //   Bottom Navigation
+      // --------------------------
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
         onTap: _onTabTapped,
@@ -57,11 +66,93 @@ class _MainScreenState extends State<MainScreen> {
         ],
       ),
 
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: theme.colorScheme.primary,
-        foregroundColor: Colors.black,
-        onPressed: () {},
-        child: const Icon(Icons.mic_none_rounded),
+      // ---------------------------------------
+      //   Floating Button: Voice + Cart Badge
+      // ---------------------------------------
+      floatingActionButton: Stack(
+        alignment: Alignment.bottomRight,
+        children: [
+          // Voice AI button
+          FloatingActionButton(
+            backgroundColor: theme.colorScheme.primary,
+            foregroundColor: Colors.black,
+            heroTag: "voiceButton",
+            child: const Icon(Icons.mic_none_rounded),
+            onPressed: () {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (context) {
+                  return DraggableScrollableSheet(
+                    initialChildSize: 0.65,
+                    minChildSize: 0.4,
+                    maxChildSize: 0.95,
+                    expand: false,
+                    builder: (_, controller) {
+                      return ChatBottomSheet(
+                        mode: "voice",
+                        scrollController: controller,
+                      );
+                    },
+                  );
+                },
+              );
+            },
+          ),
+
+          // Cart button with badge
+          Positioned(
+            right: 75,
+            bottom: 0,
+            child: GestureDetector(
+              onTap: () {
+                if (cart.items.isNotEmpty) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const CartScreen(),
+                    ),
+                  );
+                }
+              },
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.black87,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.shopping_cart,
+                        color: Colors.white, size: 24),
+                  ),
+
+                  // Cart badge
+                  if (cart.items.isNotEmpty)
+                    Positioned(
+                      right: 0,
+                      top: 0,
+                      child: Container(
+                        padding:
+                        const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Text(
+                          cart.items.length.toString(),
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

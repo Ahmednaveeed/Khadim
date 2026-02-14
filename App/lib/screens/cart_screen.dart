@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/cart_item.dart';
+import '../providers/cart_provider.dart';
 import 'checkout_screen.dart';
 
 class CartScreen extends StatefulWidget {
-  final List<CartItem> items;
-  const CartScreen({Key? key, required this.items}) : super(key: key);
+  const CartScreen({Key? key}) : super(key: key);
 
   @override
   State<CartScreen> createState() => _CartScreenState();
@@ -16,32 +17,43 @@ class _CartScreenState extends State<CartScreen> {
   @override
   void initState() {
     super.initState();
-    // Copy list so it can be modified
-    cartItems = widget.items.map((e) => e.copyWith()).toList();
+
+    // Load current provider items into a local editable list
+    cartItems = context.read<CartProvider>().items
+        .map((e) => e.copyWith())
+        .toList();
   }
 
-  double get subtotal => cartItems.fold(
-    0.0,
-        (sum, item) =>
-    sum + (double.parse(item.price.replaceAll(RegExp(r'[^0-9.]'), '')) * item.quantity),
-  );
+  double get subtotal =>
+      cartItems.fold(0.0, (sum, item) => sum + (item.price * item.quantity));
 
-  double get tax => subtotal * 0.08; // 8% example
+  double get tax => subtotal * 0.08;
   double get deliveryFee => 2.99;
   double get total => subtotal + tax + deliveryFee;
 
   void increaseQty(int index) {
-    setState(() => cartItems[index].quantity++);
+    final provider = context.read<CartProvider>();
+    provider.increaseQuantity(cartItems[index]);
+
+    setState(() {
+      cartItems[index].quantity++;
+    });
   }
 
   void decreaseQty(int index) {
-    setState(() {
-      if (cartItems[index].quantity > 1) {
+    final provider = context.read<CartProvider>();
+
+    if (cartItems[index].quantity > 1) {
+      provider.decreaseQuantity(cartItems[index]);
+      setState(() {
         cartItems[index].quantity--;
-      } else {
+      });
+    } else {
+      provider.removeItem(cartItems[index]);
+      setState(() {
         cartItems.removeAt(index);
-      }
-    });
+      });
+    }
   }
 
   @override
@@ -57,17 +69,17 @@ class _CartScreenState extends State<CartScreen> {
               IconButton(
                 icon: const Icon(Icons.delete_outline),
                 onPressed: () {
+                  context.read<CartProvider>().clear();
                   setState(() => cartItems.clear());
                 },
               ),
           ],
         ),
+
         body: cartItems.isEmpty
             ? const Center(
-          child: Text(
-            "Your cart is empty",
-            style: TextStyle(fontSize: 16),
-          ),
+          child: Text("Your cart is empty",
+              style: TextStyle(fontSize: 16)),
         )
             : Column(
           children: [
@@ -75,8 +87,9 @@ class _CartScreenState extends State<CartScreen> {
               child: ListView.builder(
                 padding: const EdgeInsets.all(16),
                 itemCount: cartItems.length,
-                itemBuilder: (context, index) {
+                itemBuilder: (_, index) {
                   final item = cartItems[index];
+
                   return Card(
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12),
@@ -85,17 +98,32 @@ class _CartScreenState extends State<CartScreen> {
                     child: ListTile(
                       leading: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
-                        child: Image.asset(
-                          item.image,
+                        child: item.image != null
+                            ? Image.asset(
+                          item.image!,
                           width: 60,
                           height: 60,
                           fit: BoxFit.cover,
+                        )
+                            : Container(
+                          width: 60,
+                          height: 60,
+                          color: Colors.grey.shade200,
+                          child: const Icon(Icons.fastfood),
                         ),
                       ),
-                      title: Text(item.title,
-                          style: const TextStyle(
-                              fontWeight: FontWeight.w600)),
-                      subtitle: Text(item.price),
+
+                      title: Text(
+                        item.title ?? item.name ?? "Item",
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w600),
+                      ),
+
+                      subtitle: Text(
+                        "Rs ${item.price}",
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -121,30 +149,32 @@ class _CartScreenState extends State<CartScreen> {
               ),
             ),
 
-            ////// Summary Section ///////
+            // Summary Section
             Container(
-              padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 color: theme.colorScheme.surface,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.05),
+                    color: Colors.black.withOpacity(0.05),
                     blurRadius: 6,
                     offset: const Offset(0, -3),
                   ),
                 ],
               ),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _buildSummaryRow("Subtotal", "\$${subtotal.toStringAsFixed(2)}"),
-                  _buildSummaryRow("Tax", "\$${tax.toStringAsFixed(2)}"),
-                  _buildSummaryRow("Delivery Fee", "\$${deliveryFee.toStringAsFixed(2)}"),
+                  _buildSummaryRow(
+                      "Subtotal", "Rs ${subtotal.toStringAsFixed(2)}"),
+                  _buildSummaryRow(
+                      "Tax", "Rs ${tax.toStringAsFixed(2)}"),
+                  _buildSummaryRow("Delivery Fee",
+                      "Rs ${deliveryFee.toStringAsFixed(2)}"),
                   const Divider(),
                   _buildSummaryRow(
                     "Total",
-                    "\$${total.toStringAsFixed(2)}",
+                    "Rs ${total.toStringAsFixed(2)}",
                     isBold: true,
                     color: Colors.black87,
                   ),
@@ -181,8 +211,12 @@ class _CartScreenState extends State<CartScreen> {
     );
   }
 
-  Widget _buildSummaryRow(String label, String value,
-      {bool isBold = false, Color color = Colors.grey}) {
+  Widget _buildSummaryRow(
+      String label,
+      String value, {
+        bool isBold = false,
+        Color color = Colors.grey,
+      }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -192,12 +226,14 @@ class _CartScreenState extends State<CartScreen> {
               style: TextStyle(
                   color: color,
                   fontSize: 15,
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+                  fontWeight:
+                  isBold ? FontWeight.bold : FontWeight.normal)),
           Text(value,
               style: TextStyle(
                   color: color,
                   fontSize: 15,
-                  fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+                  fontWeight:
+                  isBold ? FontWeight.bold : FontWeight.normal)),
         ],
       ),
     );

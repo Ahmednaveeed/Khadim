@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
 import 'themes/app_theme.dart';
+
+// Providers
+import 'providers/cart_provider.dart';
 
 // Screens
 import 'screens/splash_screen.dart';
@@ -15,9 +20,17 @@ import 'screens/add_payment_screen.dart';
 import 'screens/payment_method_screen.dart';
 import 'screens/order_confirmation_screen.dart';
 import 'screens/order_history_screen.dart';
+import 'screens/test_urdu_tts.dart';
 
 void main() {
-  runApp(const KhaadimApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => CartProvider()),
+      ],
+      child: const KhaadimApp(),
+    ),
+  );
 }
 
 class KhaadimApp extends StatelessWidget {
@@ -43,13 +56,17 @@ class KhaadimApp extends StatelessWidget {
         '/menu': (context) => const MenuScreen(),
         '/offer': (context) => const OffersScreen(),
         '/profile': (context) => const ProfileScreen(),
-        '/cart': (context) => const CartScreen(items: []),
+        '/cart': (context) => const CartScreen(),
         '/checkout': (context) => const CheckoutScreen(),
         '/payment_methods': (context) => const PaymentMethodsScreen(),
         '/add_payment': (context) => const AddPaymentScreen(),
         '/order_history': (context) => const OrderHistoryScreen(),
+        '/ttsTest': (context) => const TestUrduTTSPage(),
 
-        '/orderConfirmation': (context) => const OrderConfirmationScreen(orderNumber: 'N/A', totalAmount: 0.0,),
+        '/orderConfirmation': (context) => const OrderConfirmationScreen(
+          orderNumber: 'N/A',
+          totalAmount: 0.0,
+        ),
       },
 
       onUnknownRoute: (settings) {

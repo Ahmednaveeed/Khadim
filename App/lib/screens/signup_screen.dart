@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
+import '../services/auth_service.dart';
+import '../services/token_storage.dart';
+import 'main_screen.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({Key? key}) : super(key: key);
@@ -27,14 +30,40 @@ class _SignupScreenState extends State<SignupScreen> {
     super.dispose();
   }
 
-  void _handleSignup() {
-    if (_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Creating your account...")),
+
+  Future<void> _handleSignup() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final fullName = _nameController.text.trim();
+    final email = _emailController.text.trim();
+    final password = _passwordController.text.trim();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Creating account...")),
+    );
+
+    try {
+      final result = await AuthService.signup(
+        fullName: fullName,
+        email: email,
+        phone: null,
+        password: password,
       );
-      // TODO: Connect to backend later
+
+      final token = result['access_token'] as String;
+      await TokenStorage.saveToken(token);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
     }
   }
+
 
   @override
   Widget build(BuildContext context) {

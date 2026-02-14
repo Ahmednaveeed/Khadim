@@ -1,13 +1,49 @@
 import 'package:flutter/material.dart';
-import 'offer_screen.dart';
-import 'profile_screen.dart';
-import 'menu_screen.dart';
-import '../models/cart_item.dart';
+import 'package:provider/provider.dart';
+
+import '../models/deal_model.dart';
+import '../providers/cart_provider.dart';
+import '../services/deal_service.dart';
+import '../utils/ImageResolver.dart';
 import 'cart_screen.dart';
 
-
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  List<DealModel> deals = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    loadDeals();
+  }
+
+  Future<void> loadDeals() async {
+    try {
+      deals = await DealService.fetchDeals();
+    } catch (e) {
+      print("Error loading deals: $e");
+    }
+    setState(() => loading = false);
+  }
+
+  String getDealCategory(String dealName) {
+    final name = dealName.toLowerCase();
+
+    if (name.contains("fast")) return "fast_food";
+    if (name.contains("bbq")) return "bbq";
+    if (name.contains("chinese")) return "chinese";
+    if (name.contains("desi")) return "desi";
+    if (name.contains("drink")) return "drinks";
+
+    return "fast_food";
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -26,72 +62,43 @@ class HomeScreen extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.shopping_cart_outlined),
               onPressed: () {
-                // Open CartScreen even if empty (no items yet)
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const CartScreen(items: [])),
+                  MaterialPageRoute(builder: (_) => const CartScreen()),
                 );
               },
             ),
           ],
-
         ),
-        body: ListView(
+
+        body: loading
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            ////// Section 1 ///////
-            _buildSectionHeader(context, "Personalized for You"),
-            const SizedBox(height: 8),
-            _buildDealCard(
-              context,
-              image: "assets/images/burger.png",
-              title: "Lunch Combo",
-              subtitle: "Any burger + fries + drink",
-              oldPrice: "\$22.99",
-              newPrice: "\$15.99",
-              discount: "30%",
-            ),
-            const SizedBox(height: 12),
-            _buildDealCard(
-              context,
-              image: "assets/images/pizza.png",
-              title: "Pizza Night",
-              subtitle: "Large pizza + 2 drinks",
-              oldPrice: "\$27.99",
-              newPrice: "\$19.99",
-              discount: "29%",
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
 
-            ////// Section 2 ///////
-            _buildSectionHeader(context, "You Might Also Like"),
-            const SizedBox(height: 8),
-            _buildDealCard(
-              context,
-              image: "assets/images/pasta.png",
-              title: "Family Feast",
-              subtitle: "2 pizzas + pasta + salad + dessert",
-              oldPrice: "\$65.99",
-              newPrice: "\$49.99",
-              discount: "25%",
-            ),
+            _buildSectionHeader(context, "Recommended Deals"),
             const SizedBox(height: 12),
-            _buildDealCard(
-              context,
-              image: "assets/images/cake.png",
-              title: "Sweet Treat",
-              subtitle: "Any dessert + coffee",
-              oldPrice: "\$14.99",
-              newPrice: "\$9.99",
-              discount: "33%",
-            ),
+
+            ...deals.map((deal) {
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: _buildDealCard(
+                  context,
+                  deal: deal, // PASS THE WHOLE DEAL OBJECT
+                  image: ImageResolver.getDealImage(
+                    getDealCategory(deal.dealName),
+                  ),
+                ),
+              );
+            }),
           ],
         ),
       ),
     );
   }
 
-  ////// Section Header Widget ///////
   Widget _buildSectionHeader(BuildContext context, String title) {
     final theme = Theme.of(context);
     return Text(
@@ -103,18 +110,15 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  ////// Deal Card Widget ///////
-  Widget _buildDealCard(BuildContext context, {
-    required String image,
-    required String title,
-    required String subtitle,
-    required String oldPrice,
-    required String newPrice,
-    required String discount,
-  }) {
+  Widget _buildDealCard(
+      BuildContext context, {
+        required DealModel deal,
+        required String image,
+      }) {
     final theme = Theme.of(context);
 
     return Container(
+      width: double.infinity,
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
@@ -126,126 +130,116 @@ class HomeScreen extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          /// IMAGE
           ClipRRect(
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(16),
-              bottomLeft: Radius.circular(16),
+              topRight: Radius.circular(16),
             ),
             child: Image.asset(
               image,
-              width: 110,
-              height: 100,
+              height: 160,
+              width: double.infinity,
               fit: BoxFit.cover,
             ),
           ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ////// Title + Discount Badge ///////
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: theme.textTheme.bodyLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
-                          overflow: TextOverflow.ellipsis,
+
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                /// TITLE + SERVING SIZE
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        deal.dealName,
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+
+                    Container(
+                      padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.redAccent,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        "${deal.servingSize} Person",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.redAccent,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          discount,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 6),
+
+                /// ITEMS IN DEAL
+                Text(
+                  deal.items,
+                  style: theme.textTheme.bodyMedium,
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                ),
+
+                const SizedBox(height: 10),
+
+                /// PRICE + ADD BUTTON
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      "Rs ${deal.dealPrice}",
+                      style: TextStyle(
+                        color: theme.colorScheme.primary,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
+                    ),
 
-                  ////// Subtitle ///////
-                  Text(
-                    subtitle,
-                    style: theme.textTheme.bodyMedium,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 6),
+                    Consumer<CartProvider>(
+                      builder: (context, cart, child) {
+                        return ElevatedButton(
+                          onPressed: () {
+                            cart.addDeal(deal); // ADD TO CART
 
-                  ////// Prices + Add Button ///////
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          Text(
-                            oldPrice,
-                            style: const TextStyle(
-                              color: Colors.grey,
-                              fontSize: 14,
-                              decoration: TextDecoration.lineThrough,
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text("${deal.dealName} added to cart"),
+                                behavior: SnackBarBehavior.floating,
+                                duration: const Duration(seconds: 1),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orangeAccent,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 6,
                             ),
                           ),
-                          const SizedBox(width: 8),
-                          Text(
-                            newPrice,
-                            style: TextStyle(
-                              color: theme.colorScheme.primary,
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      ElevatedButton(
-                        onPressed: () {
-                          final item = CartItem(
-                            title: title,
-                            price: newPrice,
-                            image: image,
-                          );
-
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => CartScreen(items: [item]),
-                            ),
-                          );
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orangeAccent,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        child: const Text("Add"),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
+                          child: const Text("Add"),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
         ],

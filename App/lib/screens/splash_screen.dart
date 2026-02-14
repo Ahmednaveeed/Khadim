@@ -1,6 +1,9 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
+import '../services/token_storage.dart';
+import '../services/auth_service.dart';
+import 'main_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   final VoidCallback? onThemeToggle; // optional future toggle
@@ -29,11 +32,33 @@ class _SplashScreenState extends State<SplashScreen>
         CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
 
     // Auto-navigate to login after delay
-    Timer(const Duration(seconds: 3), () {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-      );
+    // Auto-navigate based on token after delay
+    Timer(const Duration(seconds: 3), () async {
+      final token = await TokenStorage.getToken();
+
+      if (token == null) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+        return;
+      }
+
+      try {
+        await AuthService.me(token: token);
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const MainScreen()),
+        );
+      } catch (_) {
+        await TokenStorage.clearToken();
+
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+        );
+      }
     });
   }
 

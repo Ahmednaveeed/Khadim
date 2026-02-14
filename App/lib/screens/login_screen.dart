@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'signup_screen.dart';
 import 'main_screen.dart';
+import '../services/auth_service.dart';
+import '../services/token_storage.dart';
+
 
 
 
@@ -25,16 +28,33 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _handleLogin() {
-    if (_formKey.currentState!.validate()) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Logging in...")),
+  Future<void> _handleLogin() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    final identifier = _emailController.text.trim(); // email OR phone
+    final password = _passwordController.text.trim();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Logging in...")),
+    );
+
+    try {
+      final result = await AuthService.login(
+        identifier: identifier,
+        password: password,
       );
 
-      // Simulate a short delay before navigation
-      Future.delayed(const Duration(milliseconds: 800), () {
-        Navigator.pushReplacementNamed(context, '/main');
-      });
+      final token = result['access_token'] as String;
+      await TokenStorage.saveToken(token);
+
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const MainScreen()),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
     }
   }
 
@@ -84,15 +104,17 @@ class _LoginScreenState extends State<LoginScreen> {
                     TextFormField(
                       controller: _emailController,
                       decoration: const InputDecoration(
-                        labelText: "Email",
+                        labelText: "Email or Phone",
                         prefixIcon: Icon(Icons.email_outlined),
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) {
-                          return "Please enter your email";
+                          return "Please enter email or phone";
                         }
-                        if (!value.contains("@")) {
-                          return "Enter a valid email address";
+                        if (value.contains("@")) {
+                          if (!value.contains(".")) return "Enter a valid email address";
+                        } else {
+                          if (value.length < 8) return "Enter a valid phone number";
                         }
                         return null;
                       },
@@ -178,4 +200,6 @@ class _LoginScreenState extends State<LoginScreen> {
       ),
     );
   }
+
+  
 }
