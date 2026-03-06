@@ -7,20 +7,22 @@ import 'themes/app_theme.dart';
 import 'providers/cart_provider.dart';
 
 // Screens
-import 'screens/splash_screen.dart';
-import 'screens/login_screen.dart';
-import 'screens/signup_screen.dart';
-import 'screens/main_screen.dart';
-import 'screens/menu_screen.dart';
-import 'screens/offer_screen.dart';
-import 'screens/profile_screen.dart';
-import 'screens/cart_screen.dart';
-import 'screens/checkout_screen.dart';
-import 'screens/add_payment_screen.dart';
-import 'screens/payment_method_screen.dart';
-import 'screens/order_confirmation_screen.dart';
-import 'screens/order_history_screen.dart';
-import 'screens/test_urdu_tts.dart';
+// Screens
+import 'package:khaadim/screens/auth/splash_screen.dart';
+import 'package:khaadim/screens/auth/login_screen.dart';
+import 'package:khaadim/screens/auth/signup_screen.dart';
+import 'package:khaadim/screens/navigation/main_screen.dart';
+import 'package:khaadim/screens/discover/home_screen.dart';
+import 'package:khaadim/screens/menu/menu_screen.dart';
+import 'package:khaadim/screens/discover/offer_screen.dart';
+import 'package:khaadim/screens/profile/profile_screen.dart';
+import 'package:khaadim/screens/cart/cart_screen.dart';
+import 'package:khaadim/screens/checkout/checkout_screen.dart';
+import 'package:khaadim/screens/payments/add_payment_screen.dart';
+import 'package:khaadim/screens/payments/payment_method_screen.dart';
+import 'package:khaadim/screens/orders/order_confirmation_screen.dart';
+import 'package:khaadim/screens/orders/order_history_screen.dart';
+import 'package:khaadim/screens/devtools/test_urdu_tts.dart';
 
 void main() {
   runApp(

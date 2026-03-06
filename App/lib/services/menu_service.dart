@@ -1,21 +1,13 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../models/menu_item.dart';
-import 'api_config.dart';
+import 'api_client.dart';
 
 class MenuService {
-  static String baseUrl = ApiConfig.baseUrl;
-
   static Future<List<MenuItemModel>> fetchMenu() async {
-    final response = await http.get(Uri.parse("$baseUrl/menu"));
+    final res = await ApiClient.getJson("/menu", auth: true);
 
-    if (response.statusCode != 200) {
-      throw Exception("Failed to load menu");
-    }
+    final data = res["data"] ?? res;
+    final list = (data["menu"] ?? []) as List;
 
-    final body = jsonDecode(response.body);
-    final List items = body["menu"];
-
-    return items.map((e) => MenuItemModel.fromJson(e)).toList();
+    return list.map((e) => MenuItemModel.fromJson(e)).toList();
   }
 }

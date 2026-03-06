@@ -3,10 +3,10 @@ class OfferModel {
   final String title;
   final String description;
   final String offerCode;
-  final String validity; // ISO string from backend
+  final DateTime? validity;
   final String category;
 
-  OfferModel({
+  const OfferModel({
     required this.offerId,
     required this.title,
     required this.description,
@@ -17,12 +17,14 @@ class OfferModel {
 
   factory OfferModel.fromJson(Map<String, dynamic> json) {
     return OfferModel(
-      offerId: json['offer_id'] as int,
-      title: json['title'] as String,
-      description: json['description'] as String,
-      offerCode: (json['offer_code'] ?? '') as String,
-      validity: json['validity'] as String,
-      category: json['category'] as String,
+      offerId: (json['offer_id'] ?? 0) as int,
+      title: json['title']?.toString() ?? '',
+      description: json['description']?.toString() ?? '',
+      offerCode: json['offer_code']?.toString() ?? '',
+      validity: json['validity'] != null
+          ? DateTime.tryParse(json['validity'])
+          : null,
+      category: json['category']?.toString() ?? '',
     );
   }
 }

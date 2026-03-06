@@ -8,7 +8,7 @@ class MenuItemModel {
   final String quantityDescription;
   final String imageUrl;
 
-  MenuItemModel({
+  const MenuItemModel({
     required this.itemId,
     required this.itemName,
     required this.itemDescription,
@@ -21,14 +21,16 @@ class MenuItemModel {
 
   factory MenuItemModel.fromJson(Map<String, dynamic> json) {
     return MenuItemModel(
-      itemId: json['item_id'],
-      itemName: json['item_name'],
-      itemDescription: json['item_description'] ?? '',
-      itemCategory: json['item_category'],
-      itemCuisine: json['item_cuisine'],
-      itemPrice: (json['item_price'] as num).toDouble(),
-      quantityDescription: json['quantity_description'] ?? '',
-      imageUrl: json['image_url'] ?? '',
+      itemId: (json['item_id'] ?? 0) as int,
+      itemName: json['item_name']?.toString() ?? '',
+      itemDescription: json['item_description']?.toString() ?? '',
+      itemCategory: json['item_category']?.toString() ?? '',
+      itemCuisine: json['item_cuisine']?.toString() ?? '',
+      itemPrice: (json['item_price'] is num)
+          ? (json['item_price'] as num).toDouble()
+          : 0.0,
+      quantityDescription: json['quantity_description']?.toString() ?? '',
+      imageUrl: json['image_url']?.toString() ?? '',
     );
   }
 }

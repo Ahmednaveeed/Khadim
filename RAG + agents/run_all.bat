@@ -1,70 +1,17 @@
 @echo off
-title Khadim Multi-Agent System Launcher
+REM Starts Redis (assuming "redis" container or service), then launches each Python agent in a new window.
 
-echo ================================================
-echo       K H A A D I M   -  Multi Agent System
-echo ================================================
-echo.
+echo Starting backend agents...
 
-REM -----------------------------------------------
-REM CHECK VENV EXISTS
-REM -----------------------------------------------
-echo Checking for virtual environment...
-IF NOT EXIST "venv\Scripts\activate.bat" (
-    echo ERROR: venv not found at: %cd%\venv
-    echo Make sure you created venv using:
-    echo python -m venv venv
-    pause
-    exit /b
-)
+start "Redis" cmd /k "docker run -d --name redis -p 6379:6379 redis || echo Redis already running"
+start "Cart Agent" cmd /k "python -m cart.cart_agent"
+start "Chat Agent" cmd /k "python -m chat.chat_agent"
+start "Search Agent" cmd /k "python -m retrieval.search_agent"
+start "Order Agent" cmd /k "python -m orders.order_agent"
+start "Kitchen Agent" cmd /k "python -m kitchen.kitchen_agent"
+start "Coordinator" cmd /k "python -m orders.order_coordinator"
+start "Health Dashboard" cmd /k "python -m monitoring.agent_health_dashboard"
+start "Kitchen Dashboard" cmd /k "streamlit run kitchen/kitchen_dashboard.py"
 
-echo Virtual environment found!
-echo.
-
-REM -----------------------------------------------
-REM START CART AGENT
-REM -----------------------------------------------
-echo [1/5] Starting Cart Agent...
-START "Cart Agent" cmd /k "call venv\Scripts\activate.bat && python cart_agent.py"
-
-REM -----------------------------------------------
-REM START ORDER AGENT
-REM -----------------------------------------------
-echo [2/5] Starting Order Agent...
-START "Order Agent" cmd /k "call venv\Scripts\activate.bat && python order_agent.py"
-
-REM -----------------------------------------------
-REM START KITCHEN AGENT
-REM -----------------------------------------------
-echo [3/5] Starting Kitchen Agent...
-START "Kitchen Agent" cmd /k "call venv\Scripts\activate.bat && python kitchen_agent.py"
-
-REM -----------------------------------------------
-REM START UPSELL AGENT (This was missing!)
-REM -----------------------------------------------
-echo [4/5] Starting Upsell Agent...
-START "Upsell Agent" cmd /k "call venv\Scripts\activate.bat && python upsell_agent.py"
-
-REM -----------------------------------------------
-REM START Recommender Agent (This was missing!)
-REM -----------------------------------------------
-echo [5/6] Starting Recommender Agent...
-START "Recommender Agent" cmd /k "call venv\Scripts\activate.bat && python recommender_agent.py"
-
-REM -----------------------------------------------
-REM START STREAMLIT ORCHESTRATOR
-REM -----------------------------------------------
-echo [6/6] Starting Orchestrator...
-START "Orchestrator" cmd /k "call venv\Scripts\activate.bat && python -m streamlit run orchestrator.py"
-
-REM -----------------------------------------------
-REM START CUSTOM DEAL AGENT
-REM -----------------------------------------------
-echo [7/7] Starting Custom Deal Agent...
-START "Custom Deal Agent" cmd /k "call venv\Scripts\activate.bat && python custom_deal_agent.py"
-
-echo.
-echo All 7 agents launched in separate windows.
-echo You can now open http://localhost:8501 to chat.
-echo.
+echo All windows launched. Close them individually when done.
 pause

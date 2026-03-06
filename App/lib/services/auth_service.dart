@@ -1,6 +1,5 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'api_config.dart';
+import 'api_client.dart';
+import 'token_storage.dart';
 
 class AuthService {
   static Future<Map<String, dynamic>> signup({
@@ -9,74 +8,48 @@ class AuthService {
     String? phone,
     required String password,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/auth/signup');
-
-    final body = {
-      'full_name': fullName,
-      'email': (email != null && email.trim().isNotEmpty) ? email.trim() : null,
-      'phone': (phone != null && phone.trim().isNotEmpty) ? phone.trim() : null,
-      'password': password,
-    };
-
-    final res = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(body),
+    return ApiClient.postJson(
+      '/auth/signup',
+      auth: false,
+      timeout: ApiClient.defaultTimeout,
+      body: {
+        'full_name': fullName.trim(),
+        'email': (email != null && email.trim().isNotEmpty) ? email.trim() : null,
+        'phone': (phone != null && phone.trim().isNotEmpty) ? phone.trim() : null,
+        'password': password,
+      },
     );
-
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } else {
-      throw Exception(_extractError(res.body));
-    }
   }
 
   static Future<Map<String, dynamic>> login({
-    required String identifier, // email or phone
+    required String identifier,
     required String password,
   }) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/auth/login');
-
-    final body = {
-      'identifier': identifier.trim(),
-      'password': password,
-    };
-
-    final res = await http.post(
-      uri,
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode(body),
+    return ApiClient.postJson(
+      '/auth/login',
+      auth: false,
+      timeout: ApiClient.defaultTimeout,
+      body: {
+        'identifier': identifier.trim(),
+        'password': password,
+      },
     );
-
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } else {
-      throw Exception(_extractError(res.body));
-    }
   }
 
-  static Future<Map<String, dynamic>> me({required String token}) async {
-    final uri = Uri.parse('${ApiConfig.baseUrl}/auth/me');
+  /////// SINGLE SOURCE OF TRUTH ///////
+  static Future<Map<String, dynamic>> me() async {
+    // ApiClient will attach token via AuthHeaders.withAuth(...)
+    // but we validate token existence early to avoid weird 401 UX.
+    final token = await TokenStorage.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(statusCode: 401, message: 'Not authenticated');
+    }
 
-    final res = await http.get(
-      uri,
-      headers: {'Authorization': 'Bearer $token'},
+    return ApiClient.getJson(
+      '/auth/me',
+      auth: true,
+      timeout: ApiClient.defaultTimeout,
+      retryOnNetworkError: true,
     );
-
-    if (res.statusCode >= 200 && res.statusCode < 300) {
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } else {
-      throw Exception(_extractError(res.body));
-    }
-  }
-
-  static String _extractError(String body) {
-    try {
-      final decoded = jsonDecode(body);
-      if (decoded is Map && decoded['detail'] != null) return decoded['detail'].toString();
-      return body;
-    } catch (_) {
-      return body;
-    }
   }
 }

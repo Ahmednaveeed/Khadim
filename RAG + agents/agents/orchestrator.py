@@ -1,0 +1,473 @@
+# Docker khol kar run following command on the terminal in Vs code: docker run -d --name redis -p 6379:6379 redis
+
+import os
+import uuid
+import re
+import json
+import time
+import requests # Needed for weather test
+import streamlit as st
+from datetime import datetime
+from dotenv import load_dotenv
+
+from retrieval.search_agent import load_texts, SearchAgent
+from chat.conversation_manager import ConversationManager
+from infrastructure.database_connection import DatabaseConnection
+from chat.chat_agent import get_ai_response 
+from retrieval.rag_retriever import RAGRetriever
+
+from infrastructure.redis_connection import RedisConnection
+from infrastructure.config import AGENT_TASKS_CHANNEL, RESPONSE_CHANNEL_PREFIX
+
+load_dotenv()
+
+# --- Streamlit Page Setup ---
+st.set_page_config(page_title="Khadim Bot", page_icon="🍽️")
+st.title("🍴 Khadim Restaurant Chatbot")
+
+# ----------------------------------------------------
+# Redis Pub/Sub Helper (YOUR ROBUST VERSION)
+# ----------------------------------------------------
+def send_task_and_get_response(agent: str, command: str, payload: dict) -> dict:
+    """
+    Sends a Redis task and waits for agent response.
+    """
+    redis_conn = st.session_state.redis_conn
+    response_channel = f"{RESPONSE_CHANNEL_PREFIX}{uuid.uuid4()}"
+    task_data = {
+        "agent": agent,
+        "command": command,
+        "payload": payload,
+        "response_channel": response_channel
+    }
+
+    try:
+        pubsub = redis_conn.pubsub(ignore_subscribe_messages=True)
+        pubsub.subscribe(response_channel)
+
+        # Publish task
+        redis_conn.publish(AGENT_TASKS_CHANNEL, json.dumps(task_data))
+        # print(f"[DEBUG] Published to {agent}: {command}")
+
+        # Wait for reply
+        timeout = time.time() + 8
+        while time.time() < timeout:
+            message = pubsub.get_message(timeout=1.0)
+            if not message:
+                continue
+
+            data = message.get("data")
+            if isinstance(data, bytes):
+                data = data.decode("utf-8", errors="ignore")
+
+            try:
+                result = json.loads(data)
+                pubsub.unsubscribe(response_channel)
+                return result
+            except json.JSONDecodeError:
+                pass
+
+        pubsub.unsubscribe(response_channel)
+        return {"success": False, "message": f"Timeout: No response from {agent}."}
+
+    except Exception as e:
+        return {"success": False, "message": f"Redis error: {str(e)}"}
+
+# ----------------------------------------------------
+# KITCHEN & ORDER HELPERS (FROM GROUP MEMBER)
+# ----------------------------------------------------
+
+def expand_deal_items(db: DatabaseConnection, deal_id: int, deal_qty: int):
+    """
+    Convert a deal_id into its underlying menu items.
+    """
+    items = []
+    try:
+        with db.get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT menu_item_id, quantity FROM deal_item WHERE deal_id = %s",
+                    (deal_id,)
+                )
+                rows = cur.fetchall() or []
+        
+        for row in rows:
+            # Handle both RealDictCursor and standard tuple cursor
+            if isinstance(row, dict):
+                menu_item_id = int(row["menu_item_id"])
+                base_qty = int(row["quantity"] or 1)
+            else:
+                menu_item_id = int(row[0])
+                base_qty = int(row[1] or 1)
+
+            items.append({
+                "menu_item_id": menu_item_id,
+                "qty": base_qty * deal_qty,
+            })
+    except Exception as e:
+        print(f"Error expanding deal: {e}")
+        
+    return items
+
+def finalize_order_and_send_to_kitchen(cart_id: str) -> dict:
+    """
+    Full pipeline: 
+    1) Cart Finalize 
+    2) Save Order 
+    3) ID CORRECTION (For Items AND Deals)
+    4) Send to Kitchen
+    """
+    # 1) Finalize cart
+    finalize_result = send_task_and_get_response("cart", "place_order", {"cart_id": cart_id})
+
+    if not finalize_result.get("success"):
+        return {"success": False, "message": finalize_result.get("message", "Your cart is empty.")}
+
+    cart_summary = finalize_result.get("order_data", {})
+    raw_items = cart_summary.get("items", [])
+
+    # 2) Save order in DB
+    order_result = send_task_and_get_response(
+        "order", "save_and_summarize_order",
+        {"cart_id": cart_id, "cart_summary": cart_summary}
+    )
+
+    base_message = order_result.get("message", "Order processed.")
+    order_id = order_result.get("order_id")
+
+    # ---------------------------------------------------------
+    # 3) PREPARE & HEAL KITCHEN ITEMS (THE FIX)
+    # ---------------------------------------------------------
+    kitchen_items = []
+    db = st.session_state.db_conn
+    
+    print(f"\n[ORCHESTRATOR] Starting ID Correction for Order #{order_id}...")
+
+    for it in raw_items:
+        original_id = it.get("item_id")
+        name = it.get("item_name")
+        qty = int(it.get("quantity", 1))
+        # Default to menu_item if missing, but deals usually have "deal"
+        item_type = it.get("item_type", "menu_item") 
+
+        if not name: 
+            continue
+
+        real_id = original_id # Start assuming it's correct
+
+        # --- HEALING LOGIC ---
+        try:
+            with db.get_connection() as conn:
+                with conn.cursor() as cur:
+                    
+                    # CASE A: It is a DEAL
+                    if item_type == "deal":
+                        cur.execute("SELECT deal_id FROM deal WHERE deal_name ILIKE %s", (name,))
+                        row = cur.fetchone()
+                        if row:
+                            real_id = row[0] if isinstance(row, tuple) else row['deal_id']
+                            if str(real_id) != str(original_id):
+                                print(f"[FIXED DEAL] '{name}': Swapped Stale ID {original_id} -> Real ID {real_id}")
+                    
+                    # CASE B: It is a MENU ITEM
+                    else:
+                        cur.execute("SELECT item_id FROM menu_item WHERE item_name ILIKE %s", (name,))
+                        row = cur.fetchone()
+                        if row:
+                            real_id = row[0] if isinstance(row, tuple) else row['item_id']
+                            if str(real_id) != str(original_id):
+                                print(f"[FIXED ITEM] '{name}': Swapped Stale ID {original_id} -> Real ID {real_id}")
+
+        except Exception as e:
+            print(f"[ERROR] ID Correction failed: {e}")
+        # -------------------------
+
+        # --- BUILD KITCHEN PAYLOAD ---
+        
+        # 1. If it's a Deal, we must expand it using the REAL ID
+        if item_type == "deal":
+            deal_id = int(real_id)
+            # Use the helper function to look up 'deal_item' table
+            expanded = expand_deal_items(db, deal_id, qty)
+            
+            if not expanded:
+                print(f"[WARN] Deal '{name}' (ID {deal_id}) expanded to 0 items. Check deal_item table!")
+            
+            for e in expanded:
+                # Tag it so Kitchen knows it came from a deal
+                e["expanded_from_deal"] = name
+            
+            kitchen_items.extend(expanded)
+
+        # 2. If it's a regular Menu Item
+        else:
+            kitchen_items.append({"menu_item_id": int(real_id), "qty": qty})
+
+    # 4) Send Corrected Payload to Kitchen
+    kitchen_message = ""
+    if order_id and kitchen_items:
+        kitchen_payload = {"order_id": order_id, "items": kitchen_items}
+        
+        # Debug Print
+        print(f"[ORCHESTRATOR] Sending Corrected Payload to Kitchen: {len(kitchen_items)} items")
+        
+        kitchen_plan = send_task_and_get_response("kitchen", "plan_order", kitchen_payload)
+
+        if kitchen_plan.get("success"):
+            est = kitchen_plan.get("estimated_total_minutes", "?")
+            kitchen_message = f"\n\n👨‍🍳 **Kitchen Update:** Your order is being prepared.\n⏱️ Estimated time: **{est} minutes**."
+        else:
+            kitchen_message = "\n\n(Note: Kitchen system offline, but order is saved.)"
+    
+    full_message = base_message + kitchen_message
+    return {
+        "success": True,
+        "message": full_message,
+        "order_result": order_result
+    }
+
+def update_kitchen_task(task_id: str, new_status: str) -> dict:
+    """Debug helper to update kitchen status"""
+    return send_task_and_get_response("kitchen", "update_status", {"task_id": task_id, "new_status": new_status})
+
+# ----------------------------------------------------
+# Initialize Session State & STARTUP LOGIC
+# ----------------------------------------------------
+if "initialized" not in st.session_state:
+    st.session_state.conv_mgr = ConversationManager(max_history=10)
+    st.session_state.search_agent = SearchAgent()
+    st.session_state.rag_retriever = RAGRetriever()
+    st.session_state.redis_conn = RedisConnection.get_instance()
+    st.session_state.db_conn = DatabaseConnection.get_instance()
+
+    st.session_state.redis_ok = st.session_state.redis_conn is not None
+    st.session_state.db_ok = st.session_state.db_conn.test_connection()
+
+    # Create Initial Cart
+    st.session_state.cart_id = str(uuid.uuid4())
+    st.session_state.initialized = True
+    st.session_state.force_refresh = False
+    st.session_state.selected_city = "Islamabad" # Default
+
+    if st.session_state.redis_ok:
+        send_task_and_get_response('cart', 'create_cart', {'user_id': st.session_state.cart_id})
+
+    # --- STARTUP SMART GREETING (NEW FEATURE) ---
+    if "did_startup_upsell" not in st.session_state and st.session_state.redis_ok:
+        st.session_state.did_startup_upsell = True
+        
+        now = datetime.now()
+        hour = now.hour
+        greeting = "Good morning" if 5 <= hour < 12 else "Good afternoon" if 12 <= hour < 17 else "Good evening"
+        
+        startup_msg = f"{greeting}! Welcome to Khadim.\n\n"
+        
+        # 1. Weather Upsell
+        result = send_task_and_get_response("upsell", "weather_upsell", {"city": st.session_state.selected_city})
+        
+        if result.get("success"):
+            wx = result.get("weather", {})
+            temp = wx.get("temp")
+            cond = wx.get("condition")
+            headline = result.get("headline", "Here are some suggestions:")
+            items = result.get("items", [])
+            
+            if temp and cond:
+                startup_msg += f"It's currently **{temp:.1f}°C** ({cond}) in {st.session_state.selected_city}.\n{headline}\n"
+            
+            for it in items:
+                startup_msg += f"- {it.get('item_name')} ({it.get('item_cuisine')})\n"
+        
+        startup_msg += "\nHow can I help you today?"
+        st.session_state.conv_mgr.add_message("assistant", startup_msg)
+
+if not st.session_state.db_ok:
+    st.error("Database connection failed.")
+    st.stop()
+
+if not st.session_state.redis_ok:
+    st.error("Redis connection failed.")
+    st.stop()
+
+# ----------------------------------------------------
+# Sidebar
+# ----------------------------------------------------
+with st.sidebar:
+    # --- CITY SELECTOR (For Weather Upsell Testing) ---
+    st.header("🌍 Location")
+    cities = ["Islamabad", "Lahore", "Karachi", "London", "Moscow", "Dubai"]
+    selection = st.selectbox("Select City", cities, index=0)
+    
+    if selection != st.session_state.selected_city:
+        st.session_state.selected_city = selection
+        # Reset startup upsell to trigger it again with new city
+        st.session_state.did_startup_upsell = False 
+        st.rerun()
+
+    st.divider()
+
+    # --- CART SECTION (YOUR ROBUST LOGIC) ---
+    st.header("🛒 Your Cart")
+    summary = {}
+    for _ in range(3): 
+        summary = send_task_and_get_response('cart', 'get_cart_summary', {'cart_id': st.session_state.cart_id})
+        if summary and "items" in summary: break
+        time.sleep(0.2)
+
+    if not summary or "items" not in summary:
+        st.caption("Connecting to cart...")
+    elif summary.get("is_empty", True):
+        st.info("Cart is empty.")
+    else:
+        for item in summary["items"]:
+            st.write(f"{item['quantity']}× **{item['item_name']}**\nRs. {item['total_price']:.2f}")
+        st.markdown(f"### Total: Rs. {summary['total_price']:.2f}")
+
+        # --- PLACE ORDER BUTTON ---
+        if st.button("Place Order"):
+            with st.spinner("sending to kitchen..."):
+                # Use the NEW Pipeline
+                flow_result = finalize_order_and_send_to_kitchen(st.session_state.cart_id)
+                
+                if flow_result.get('success'):
+                    msg = flow_result.get('message')
+                    st.success("Order Sent!")
+                    
+                    # Sync with Chat
+                    st.session_state.conv_mgr.add_message("assistant", f"✅ **(Sidebar Action)** {msg}\n\nI have started a new empty cart for you.")
+                    
+                    # Reset Cart
+                    new_cart_id = str(uuid.uuid4())
+                    st.session_state.cart_id = new_cart_id
+                    send_task_and_get_response('cart', 'create_cart', {'user_id': new_cart_id})
+                    
+                    time.sleep(1)
+                    st.rerun()
+                else:
+                    st.error(flow_result.get('message', 'Order failed.'))
+
+    st.divider()
+    
+    # --- DEV TOOLS (From Group Member) ---
+    with st.expander("👨‍🍳 Dev Tools"):
+        st.caption("Kitchen Status Test")
+        t_id = st.text_input("Task ID (e.g. orderid-1)")
+        stat = st.selectbox("Status", ["QUEUED", "IN_PROGRESS", "READY", "COMPLETED"])
+        if st.button("Update Status"):
+            res = update_kitchen_task(t_id, stat)
+            st.write(res)
+
+# ----------------------------------------------------
+# Main Chat Interface
+# ----------------------------------------------------
+st.markdown("---")
+st.header("Conversation")
+
+for msg in st.session_state.conv_mgr.get_history():
+    st.markdown(f"**{msg['role'].title()}:** {msg['content']}")
+
+with st.form("chat_form", clear_on_submit=True):
+    user_input = st.text_input("Your message", "")
+    submitted = st.form_submit_button("Send")
+
+# ----------------------------------------------------
+# Chat Logic
+# ----------------------------------------------------
+if submitted and user_input:
+    conv_mgr = st.session_state.conv_mgr
+    agent_search = st.session_state.search_agent
+    rag = st.session_state.rag_retriever
+
+    # Add Reminder to Input (YOUR FIX)
+    reminder_text = """
+(SYSTEM NOTE: Check your tools. If the user is asking to add, remove, search, or place an order, you MUST generate the 'TOOL_CALL:' line. Do not just say you did it.)
+"""
+    # conv_mgr.add_message("user", user_input) # Don't add reminder to UI history
+    # We add reminder only when sending to AI
+    
+    relevant_context = rag.search(user_input)
+    ai_message = get_ai_response(user_input + reminder_text, conv_mgr.get_history(), relevant_context)
+    
+    # Store user msg in UI
+    conv_mgr.add_message("user", user_input)
+    
+    bot_response = ""
+
+    if ai_message.tool_calls:
+        responses = []
+        
+        for tool_call in ai_message.tool_calls:
+            function_name = tool_call["name"]
+            args = tool_call["args"]
+
+            # --- WEATHER UPSELL (NEW) ---
+            if function_name == "weather_upsell":
+                city = st.session_state.selected_city
+                res = send_task_and_get_response("upsell", "weather_upsell", {"city": city})
+                if res.get("success"):
+                    responses.append(res.get("headline", "Recommendations based on weather:"))
+                    for it in res.get("items", []):
+                        responses.append(f"- {it['item_name']}")
+                else:
+                    responses.append("Couldn't check weather right now.")
+
+            # --- ADD TO CART ---
+            elif function_name == "add_to_cart":
+                item_name = args.get("item_name")
+                qty = int(args.get("quantity", 1))
+                
+                hits = agent_search.search(item_name)
+                if not hits and " " in item_name: hits = agent_search.search(item_name.replace(" ", ""))
+                
+                if hits:
+                    payload = {'cart_id': st.session_state.cart_id, 'item_data': hits[0], 'quantity': qty}
+                    result = send_task_and_get_response('cart', 'add_item', payload)
+                    responses.append(result.get('message', f"Added {item_name}."))
+                    st.session_state.force_refresh = True
+                else:
+                    responses.append(f"I couldn't find '{item_name}' on the menu.")
+
+            # --- REMOVE FROM CART ---
+            elif function_name == "remove_from_cart":
+                item_name = args.get("item_name")
+                payload = {'cart_id': st.session_state.cart_id, 'item_name': item_name}
+                result = send_task_and_get_response('cart', 'remove_item', payload)
+                responses.append(result.get('message', "Item removed."))
+                st.session_state.force_refresh = True
+
+            # --- SHOW CART ---
+            elif function_name == "show_cart":
+                summary = send_task_and_get_response('cart', 'get_cart_summary', {'cart_id': st.session_state.cart_id})
+                if summary.get('success') and not summary.get('is_empty'):
+                    lines = [f"- {it['quantity']}x {it['item_name']} (Rs. {it['total_price']})" for it in summary['items']]
+                    responses.append("Here is your cart:\n" + "\n".join(lines) + f"\n\n**Total: Rs. {summary['total_price']}**")
+                else:
+                    responses.append("Your cart is empty.")
+                st.session_state.force_refresh = True
+
+            # --- PLACE ORDER (UPDATED PIPELINE) ---
+            elif function_name == "place_order":
+                with st.spinner("Placing order..."):
+                    flow_result = finalize_order_and_send_to_kitchen(st.session_state.cart_id)
+                    
+                    if flow_result.get('success'):
+                        responses.append(flow_result.get('message'))
+                        
+                        # Reset
+                        new_cart_id = str(uuid.uuid4())
+                        st.session_state.cart_id = new_cart_id
+                        send_task_and_get_response('cart', 'create_cart', {'user_id': new_cart_id})
+                        st.session_state.force_refresh = True
+                    else:
+                        responses.append("I couldn't place the order. Your cart might be empty.")
+
+        bot_response = "\n".join(responses)
+    else:
+        bot_response = ai_message.content
+
+    conv_mgr.add_message("assistant", bot_response)
+
+if st.session_state.get("force_refresh", False):
+    st.session_state.force_refresh = False
+    time.sleep(0.5)
+    st.rerun()

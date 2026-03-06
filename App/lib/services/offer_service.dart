@@ -1,19 +1,13 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../models/offer_model.dart';
-import 'api_config.dart';
+import 'api_client.dart';
 
 class OfferService {
-  static String baseUrl = ApiConfig.baseUrl;
-
   static Future<List<OfferModel>> fetchOffers() async {
-    final response = await http.get(Uri.parse("$baseUrl/offers"));
+    final res = await ApiClient.getJson("/offers", auth: true);
 
-    if (response.statusCode != 200) {
-      throw Exception("Failed to load offers");
-    }
+    // If backend returns a raw list, ApiClient wraps it as {"data": [...]}
+    final data = (res["data"] ?? res["offers"] ?? []) as List;
 
-    final List data = jsonDecode(response.body);
     return data.map((e) => OfferModel.fromJson(e)).toList();
   }
 }

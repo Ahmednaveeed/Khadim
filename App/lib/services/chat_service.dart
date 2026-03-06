@@ -1,68 +1,75 @@
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
+
 import 'api_config.dart';
-import 'auth_headers.dart';
+import 'token_storage.dart';
 
 class ChatService {
-  final String baseUrl = ApiConfig.baseUrl;
+  static String get _base => ApiConfig.baseUrl;
 
-  // -------------------------
-  // TEXT MESSAGE
-  // -------------------------
+  static const Duration timeout = Duration(seconds: 25);
+
   Future<Map<String, dynamic>> sendTextMessage(
       String sessionId,
-      String message,
-      String language,
+      String text,
+      String lang,
       ) async {
+    final token = await TokenStorage.getToken();
+    final uri = Uri.parse("$_base/chat/text");
 
-    final url = Uri.parse("$baseUrl/chat");
-
-    final response = await http.post(
-      url,
-      headers: await AuthHeaders.getHeaders(),      body: jsonEncode({
+    final res = await http
+        .post(
+      uri,
+      headers: {
+        "Content-Type": "application/json",
+        if (token != null && token.isNotEmpty) "Authorization": "Bearer $token",
+      },
+      body: jsonEncode({
         "session_id": sessionId,
-        "message": message,
-        "language": language,
+        "text": text,
+        "lang": lang,
       }),
-    );
+    )
+        .timeout(timeout);
 
-    return jsonDecode(response.body);
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw Exception("Chat text failed: ${res.statusCode} ${res.body}");
+    }
+
+    final decoded = jsonDecode(res.body);
+    return (decoded is Map<String, dynamic>) ? decoded : {"reply": ""};
   }
 
-  // -------------------------
-  // VOICE MESSAGE
-  // -------------------------
   Future<Map<String, dynamic>> sendVoiceMessage(
       String sessionId,
-      File file,
-      String selectedVoice,
-      String language,
+      File audioFile,
+      String mode,
+      String lang,
       ) async {
+    final token = await TokenStorage.getToken();
+    final uri = Uri.parse("$_base/chat/voice");
 
-    final url = Uri.parse("$baseUrl/voice_chat");
+    final req = http.MultipartRequest("POST", uri);
 
-    final request = http.MultipartRequest("POST", url);
+    if (token != null && token.isNotEmpty) {
+      req.headers["Authorization"] = "Bearer $token";
+    }
 
-    final headers = await AuthHeaders.getHeaders(json: false);
-    request.headers.addAll(headers);
+    req.fields["session_id"] = sessionId;
+    req.fields["mode"] = mode; // "voice" in your call
+    req.fields["lang"] = lang; // "en"
+    req.files.add(await http.MultipartFile.fromPath("file", audioFile.path));
 
-    request.fields["session_id"] = sessionId;
-    request.fields["voice"] = selectedVoice;
-    request.fields["language"] = language;
+    final streamed = await req.send().timeout(timeout);
+    final body = await streamed.stream.bytesToString();
 
-    request.files.add(
-      await http.MultipartFile.fromPath(
-        "file",
-        file.path,
-        contentType: MediaType("audio", "aac"),
-      ),
-    );
+    if (streamed.statusCode < 200 || streamed.statusCode >= 300) {
+      throw Exception("Chat voice failed: ${streamed.statusCode} $body");
+    }
 
-    final streamedResponse = await request.send();
-    final response = await http.Response.fromStream(streamedResponse);
-
-    return jsonDecode(response.body);
+    final decoded = jsonDecode(body);
+    return (decoded is Map<String, dynamic>) ? decoded : {"transcript": "", "reply": ""};
   }
 }

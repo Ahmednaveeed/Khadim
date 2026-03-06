@@ -1,11 +1,13 @@
+import 'orderitem.dart';
+
 class Order {
   final String orderNumber;
   final double totalAmount;
   final String address;
-  final List<Map<String, dynamic>> items;
+  final List<OrderItem> items;
   final DateTime createdAt;
 
-  Order({
+  const Order({
     required this.orderNumber,
     required this.totalAmount,
     required this.address,
@@ -13,22 +15,18 @@ class Order {
     required this.createdAt,
   });
 
-  // Ready for backend integration
-  Map<String, dynamic> toJson() => {
-    'orderNumber': orderNumber,
-    'totalAmount': totalAmount,
-    'address': address,
-    'items': items,
-    'createdAt': createdAt.toIso8601String(),
-  };
-
   factory Order.fromJson(Map<String, dynamic> json) {
     return Order(
-      orderNumber: json['orderNumber'],
-      totalAmount: json['totalAmount'],
-      address: json['address'],
-      items: List<Map<String, dynamic>>.from(json['items']),
-      createdAt: DateTime.parse(json['createdAt']),
+      orderNumber: json['orderNumber']?.toString() ?? '',
+      totalAmount: (json['totalAmount'] is num)
+          ? (json['totalAmount'] as num).toDouble()
+          : 0.0,
+      address: json['address']?.toString() ?? '',
+      items: (json['items'] as List? ?? [])
+          .map((e) => OrderItem.fromJson(e))
+          .toList(),
+      createdAt: DateTime.tryParse(json['createdAt'] ?? '') ??
+          DateTime.now(),
     );
   }
 }
