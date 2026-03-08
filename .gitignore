@@ -35,3 +35,9 @@ build/
 # Operating System
 .DS_Store
 Thumbs.db
+
+# Large model files
+*.safetensors
+*.bin
+*.pt
+*.pth

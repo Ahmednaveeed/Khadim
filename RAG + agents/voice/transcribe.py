@@ -3,7 +3,11 @@ import torch
 import librosa
 from transformers import WhisperProcessor, WhisperForConditionalGeneration
 
-MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", r"D:\Final YEar Project\voice\whisper_urdu_final")
+# Resolve model path relative to this repo, or override via .env
+_DEFAULT_MODEL_PATH = os.path.normpath(
+    os.path.join(os.path.dirname(__file__), "..", "..", "voice", "whisper_urdu_final")
+)
+MODEL_PATH = os.getenv("WHISPER_MODEL_PATH", _DEFAULT_MODEL_PATH)
 
 print("Loading Whisper model (safetensors)...")
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

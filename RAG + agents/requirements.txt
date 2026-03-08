@@ -1,11 +1,39 @@
-streamlit
-psycopg2-binary
+# FastAPI
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+
+# Database
 sqlalchemy
+psycopg2-binary
+alembic
+
+# Authentication
+python-jose[cryptography]
+passlib[bcrypt]
+argon2-cffi
+
+# Agents
+redis
 openai
 langchain
+langchain-openai
+langchain-community
 faiss-cpu
-python-dotenv
-numpy
-redis
-requests
+langchain-groq
 tiktoken
+
+# Voice (inference only)
+openai-whisper
+gtts
+librosa
+
+# Utilities
+numpy
+requests
+email-validator
+
+# NOTE: ffmpeg must also be installed separately on your system (not on venv)
+# Windows: winget install ffmpeg
+# Verify: ffmpeg -version
