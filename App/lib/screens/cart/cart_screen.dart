@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:khaadim/providers/cart_provider.dart';
 import 'package:khaadim/screens/checkout/checkout_screen.dart';
+import 'package:khaadim/services/cart_service.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({Key? key}) : super(key: key);
@@ -11,13 +12,55 @@ class CartScreen extends StatefulWidget {
 }
 
 class _CartScreenState extends State<CartScreen> {
+  List<Map<String, dynamic>> _recommendations = [];
+  final Set<int> _addingRec = {};
+
   @override
   void initState() {
     super.initState();
-    // On open, pull latest snapshot from server
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<CartProvider>().sync();
+    // On open, pull latest snapshot from server then load recommendations
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<CartProvider>().sync();
+      _loadRecommendations();
     });
+  }
+
+  Future<void> _loadRecommendations() async {
+    final cartId = context.read<CartProvider>().cartId;
+    if (cartId == null) return;
+    final recs = await CartService.fetchRecommendations(cartId: cartId);
+    if (mounted) setState(() => _recommendations = recs);
+  }
+
+  Future<void> _addRecommendedItem(Map<String, dynamic> rec) async {
+    final cartId = context.read<CartProvider>().cartId;
+    if (cartId == null) return;
+    final itemId = rec['recommended_item_id'] as int;
+    setState(() => _addingRec.add(itemId));
+    try {
+      await CartService.addItem(
+        cartId: cartId,
+        itemType: 'menu_item',
+        itemId: itemId,
+        quantity: 1,
+      );
+      await context.read<CartProvider>().sync();
+      if (mounted) {
+        setState(() {
+          _recommendations.removeWhere(
+              (r) => r['recommended_item_id'] == itemId);
+        });
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text("${rec['recommended_name']} added to cart!"),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 1),
+        ));
+      }
+    } catch (_) {
+      // fail silently
+    } finally {
+      if (mounted) setState(() => _addingRec.remove(itemId));
+    }
   }
 
   double _subtotal(List items) {
@@ -157,6 +200,134 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                 ),
 
+                // ── Recommendations Row ──────────────────────────────
+                if (_recommendations.isNotEmpty)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.auto_awesome,
+                                color: Color(0xFFD4AF37), size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              "Goes well with your order",
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: const Color(0xFFD4AF37),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        height: 120,
+                        child: ListView.builder(
+                          scrollDirection: Axis.horizontal,
+                          padding:
+                              const EdgeInsets.symmetric(horizontal: 12),
+                          itemCount: _recommendations.length,
+                          itemBuilder: (_, i) {
+                            final rec = _recommendations[i];
+                            final itemId =
+                                rec['recommended_item_id'] as int;
+                            final isAdding = _addingRec.contains(itemId);
+                            return Container(
+                              width: 160,
+                              margin: const EdgeInsets.only(right: 10),
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surface,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: const Color(0xFFD4AF37)
+                                      .withOpacity(0.3),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    rec['recommended_name'] as String,
+                                    style: const TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: Colors.white,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    "goes well with ${rec['for_item']}",
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Color(0xFFB0B0B0),
+                                    ),
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Row(
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        "Rs ${(rec['recommended_price'] as num).toStringAsFixed(0)}",
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: Color(0xFFD4AF37),
+                                        ),
+                                      ),
+                                      GestureDetector(
+                                        onTap: isAdding
+                                            ? null
+                                            : () =>
+                                                _addRecommendedItem(rec),
+                                        child: AnimatedContainer(
+                                          duration: const Duration(
+                                              milliseconds: 200),
+                                          width: 28,
+                                          height: 28,
+                                          decoration: BoxDecoration(
+                                            color: isAdding
+                                                ? const Color(0xFF2A2A2A)
+                                                : const Color(0xFFD4AF37),
+                                            borderRadius:
+                                                BorderRadius.circular(8),
+                                          ),
+                                          child: isAdding
+                                              ? const Padding(
+                                                  padding:
+                                                      EdgeInsets.all(6),
+                                                  child:
+                                                      CircularProgressIndicator(
+                                                    strokeWidth: 2,
+                                                    color: Color(0xFFD4AF37),
+                                                  ),
+                                                )
+                                              : const Icon(Icons.add,
+                                                  color: Colors.black,
+                                                  size: 18),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                  ),
+
+                // ── Order Summary ────────────────────────────────────
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   decoration: BoxDecoration(

@@ -6,6 +6,7 @@ import 'package:khaadim/providers/cart_provider.dart';
 import 'package:khaadim/services/deal_service.dart';
 import 'package:khaadim/utils/ImageResolver.dart';
 import 'package:khaadim/screens/cart/cart_screen.dart';
+import 'package:khaadim/screens/discover/upsell_popup.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -15,6 +16,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  static bool _upsellShown = false;
+
   List<DealModel> deals = [];
   bool loading = true;
 
@@ -22,6 +25,20 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     loadDeals();
+    // Show upsell popup only once per app session
+    if (!_upsellShown) {
+      _upsellShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _showUpsellPopup());
+    }
+  }
+
+  void _showUpsellPopup() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierColor: Colors.black.withOpacity(0.6),
+      builder: (_) => const UpsellPopup(),
+    );
   }
 
   Future<void> loadDeals() async {

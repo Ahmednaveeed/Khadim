@@ -94,4 +94,20 @@ class CartService {
       },
     );
   }
+
+  /////// RECOMMENDATIONS ///////
+  static Future<List<Map<String, dynamic>>> fetchRecommendations({
+    required String cartId,
+  }) async {
+    try {
+      final res = await ApiClient.getJson(
+        "/cart/$cartId/recommendations",
+        auth: true,
+      );
+      final raw = res["recommendations"] as List<dynamic>? ?? [];
+      return raw.cast<Map<String, dynamic>>();
+    } catch (_) {
+      return [];
+    }
+  }
 }

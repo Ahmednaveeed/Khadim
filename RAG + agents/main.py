@@ -16,8 +16,16 @@ from sqlalchemy import text
 
 from cart.cart_routes import router as cart_router
 from orders.order_routes import router as order_router
+from agents.upsell_agent import UpsellAgent
+from agents.recommender_agent import RecommendationEngine
+from auth.auth_routes import get_current_user
+from fastapi import Depends
+from typing import Dict, List
 
 from infrastructure.db import SQL_ENGINE
+
+upsell_agent = UpsellAgent()
+recommendation_engine = RecommendationEngine()
 
 print("DB URL = ", os.getenv("DATABASE_URL"))
 
@@ -401,6 +409,90 @@ def get_all_deals():
         rows = conn.execute(query).mappings().all()
 
     return {"deals": rows}
+
+@app.get("/upsell")
+def get_upsell(city: str = "Islamabad"):
+    """Weather-based upsell recommendations. No auth required."""
+    return upsell_agent.weather_upsell(city)
+
+
+@app.get("/cart/{cart_id}/recommendations")
+def get_cart_recommendations(
+    cart_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """Rule-based cross-sell recommendations for items in the cart."""
+    with SQL_ENGINE.connect() as conn:
+        # Verify cart belongs to requesting user
+        cart_row = conn.execute(
+            text("SELECT user_id FROM cart WHERE cart_id = :cid LIMIT 1"),
+            {"cid": cart_id},
+        ).mappings().fetchone()
+
+        if not cart_row or str(cart_row["user_id"]) != str(current_user["user_id"]):
+            return {"recommendations": []}
+
+        # Fetch cart items with their menu_item category
+        items = conn.execute(
+            text("""
+                SELECT ci.item_id, ci.item_name, ci.item_type,
+                       mi.item_category
+                FROM cart_items ci
+                LEFT JOIN menu_item mi ON mi.item_id = ci.item_id AND ci.item_type = 'menu_item'
+                WHERE ci.cart_id = :cid
+            """),
+            {"cid": cart_id},
+        ).mappings().all()
+
+    if not items:
+        return {"recommendations": []}
+
+    all_names = [r["item_name"] for r in items if r["item_name"]]
+    exclude_categories = {"drink", "side", "starter", "bread"}
+
+    main_items = [
+        r for r in items
+        if r["item_type"] == "menu_item"
+        and (r["item_category"] or "").lower() not in exclude_categories
+    ]
+
+    seen_recommendations: set = set()
+    results: List[Dict] = []
+
+    for item in main_items:
+        rec = recommendation_engine.get_recommendation(item["item_name"], all_names)
+        if not rec.get("success"):
+            continue
+
+        rec_name = rec["recommended_item"]
+        if rec_name.lower() in seen_recommendations:
+            continue
+        seen_recommendations.add(rec_name.lower())
+
+        # Look up item_id and price from menu_item table
+        with SQL_ENGINE.connect() as conn:
+            row = conn.execute(
+                text("""
+                    SELECT item_id, item_price
+                    FROM menu_item
+                    WHERE LOWER(item_name) = LOWER(:name)
+                    LIMIT 1
+                """),
+                {"name": rec_name},
+            ).mappings().fetchone()
+
+        if not row:
+            continue
+
+        results.append({
+            "for_item": item["item_name"],
+            "recommended_name": rec_name,
+            "recommended_item_id": int(row["item_id"]),
+            "recommended_price": float(row["item_price"]),
+            "reason": rec["reason"],
+        })
+
+    return {"recommendations": results}
 
 @app.get("/health")
 def health():
