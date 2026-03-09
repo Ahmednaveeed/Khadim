@@ -150,7 +150,15 @@
 
         const header = document.createElement('div');
         header.className = 'order-header';
-        header.innerHTML = `Order <span>#${order.order_id}</span> &nbsp;–&nbsp; Overall: <span>${order.overall_status}</span>`;
+        const cname = order.customer_name || 'Unknown';
+        const cid = order.customer_id ? order.customer_id.substring(0,8) : 'N/A';
+        header.innerHTML = `
+          Order <span>#${order.order_id}</span>
+          &nbsp;–&nbsp;
+          <span style="color:#ffffff;font-weight:700">${cname}</span>
+          <span style="color:#aaa;font-size:0.8rem"> &nbsp;(ID: ${cid})</span>
+          &nbsp;&nbsp;Overall: <span>${order.overall_status.replace('_',' ')}</span>
+        `;
         block.appendChild(header);
 
         const grid = document.createElement('div');

@@ -512,17 +512,22 @@ def health():
 
 @app.get("/kitchen/orders")
 def kitchen_get_orders():
-    """Return all active kitchen tasks grouped by order_id."""
+    """Return all active kitchen tasks grouped by order_id, with customer info."""
     db = DatabaseConnection.get_instance()
     import psycopg2.extras
     with db.get_connection() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute("""
-                SELECT task_id, order_id, item_name, qty, station,
-                       assigned_chef, estimated_minutes, status
-                FROM kitchen_tasks
-                WHERE status IN ('QUEUED', 'IN_PROGRESS', 'READY')
-                ORDER BY order_id, task_id
+                SELECT kt.task_id, kt.order_id, kt.item_name, kt.qty, kt.station,
+                       kt.assigned_chef, kt.estimated_minutes, kt.status,
+                       COALESCE(NULLIF(u.full_name,''), NULLIF(u.email,''), NULLIF(u.phone,''), 'Unknown') AS customer_name,
+                       u.user_id AS customer_id
+                FROM kitchen_tasks kt
+                LEFT JOIN orders o ON o.order_id = kt.order_id
+                LEFT JOIN cart c ON c.cart_id = o.cart_id
+                LEFT JOIN auth.app_users u ON u.user_id = c.user_id
+                WHERE kt.status IN ('QUEUED', 'IN_PROGRESS', 'READY')
+                ORDER BY kt.order_id, kt.task_id
             """)
             rows = cur.fetchall()
 
@@ -532,9 +537,14 @@ def kitchen_get_orders():
     for row in rows:
         oid = row["order_id"]
         if oid not in orders:
-            orders[oid] = {"order_id": oid, "tasks": [], "overall_status": "READY"}
+            orders[oid] = {
+                "order_id": oid,
+                "tasks": [],
+                "overall_status": "READY",
+                "customer_name": row["customer_name"],
+                "customer_id": str(row["customer_id"]) if row["customer_id"] else "",
+            }
         orders[oid]["tasks"].append(dict(row))
-        # overall_status = lowest rank (earliest stage) among all tasks
         if STATUS_RANK.get(row["status"], 2) < STATUS_RANK.get(orders[oid]["overall_status"], 2):
             orders[oid]["overall_status"] = row["status"]
 
