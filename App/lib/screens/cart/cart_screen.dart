@@ -5,7 +5,7 @@ import 'package:khaadim/screens/checkout/checkout_screen.dart';
 import 'package:khaadim/services/cart_service.dart';
 
 class CartScreen extends StatefulWidget {
-  const CartScreen({Key? key}) : super(key: key);
+  const CartScreen({super.key});
 
   @override
   State<CartScreen> createState() => _CartScreenState();
@@ -257,7 +257,6 @@ class _CartScreenState extends State<CartScreen> {
                                     style: const TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
-                                      color: Colors.white,
                                     ),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
