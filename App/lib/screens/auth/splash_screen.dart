@@ -1,9 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'login_screen.dart';
-import 'package:khaadim/services/token_storage.dart';
-import 'package:khaadim/services/auth_service.dart';
-import 'package:khaadim/screens/navigation/main_screen.dart';
 import 'package:khaadim/utils/session_bootstrap.dart';
 
 class SplashScreen extends StatefulWidget {

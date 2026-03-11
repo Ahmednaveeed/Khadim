@@ -9,4 +9,16 @@ class DealService {
     final list = (res["deals"] ?? []) as List;
     return list.map((e) => DealModel.fromJson(e)).toList();
   }
+
+  /// Create a custom deal using natural language query
+  /// Returns: {success: bool, message: String, deal_data: {...}}
+  static Future<Map<String, dynamic>> createCustomDeal(String query) async {
+    final res = await ApiClient.postJson(
+      "/deals/custom",
+      body: {"query": query},
+      auth: true,
+      timeout: const Duration(seconds: 30), // LLM calls may take longer
+    );
+    return res;
+  }
 }

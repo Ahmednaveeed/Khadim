@@ -6,7 +6,7 @@ import 'package:khaadim/services/offer_service.dart';
 import 'package:khaadim/services/deal_service.dart';
 
 class OffersScreen extends StatefulWidget {
-  const OffersScreen({Key? key}) : super(key: key);
+  const OffersScreen({super.key});
 
   @override
   State<OffersScreen> createState() => _OffersScreenState();
@@ -242,7 +242,7 @@ class _OffersScreenState extends State<OffersScreen> {
                       code: offer.offerCode,
                     ),
                   );
-                }).toList(),
+                }),
                 const SizedBox(height: 24),
               ],
 
@@ -272,7 +272,7 @@ class _OffersScreenState extends State<OffersScreen> {
                     discount: "${deal.servingSize} Person",
                   ),
                 );
-              }).toList(),
+              }),
             ],
           ),
         ),

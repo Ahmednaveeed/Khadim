@@ -1,6 +1,3 @@
-import 'package:flutter/services.dart' show rootBundle;
-import 'dart:async';
-
 class ImageResolver {
   // Category folder paths
   static const Map<String, String> categoryFolders = {

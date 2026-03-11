@@ -19,7 +19,6 @@ import 'package:khaadim/screens/cart/cart_screen.dart';
 import 'package:khaadim/screens/checkout/checkout_screen.dart';
 import 'package:khaadim/screens/payments/add_payment_screen.dart';
 import 'package:khaadim/screens/payments/payment_method_screen.dart';
-import 'package:khaadim/screens/orders/order_confirmation_screen.dart';
 import 'package:khaadim/screens/orders/order_history_screen.dart';
 import 'package:khaadim/screens/devtools/test_urdu_tts.dart';
 

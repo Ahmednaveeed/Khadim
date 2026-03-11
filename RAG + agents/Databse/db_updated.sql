@@ -491,6 +491,79 @@ ALTER SEQUENCE public.orders_order_id_seq OWNED BY public.orders.order_id;
 
 
 --
+-- Name: payments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.payments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.payments_id_seq OWNER TO postgres;
+
+
+--
+-- Name: payments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.payments (
+    id integer NOT NULL DEFAULT nextval('public.payments_id_seq'::regclass),
+    transaction_id character varying NOT NULL,
+    order_id integer,
+    user_id uuid NOT NULL,
+    card_id integer NOT NULL,
+    amount numeric NOT NULL,
+    card_last4 character varying,
+    card_type character varying,
+    cardholder_name character varying,
+    status character varying DEFAULT 'PENDING'::character varying,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE public.payments OWNER TO postgres;
+
+ALTER SEQUENCE public.payments_id_seq OWNED BY public.payments.id;
+
+
+--
+-- Name: saved_cards_card_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.saved_cards_card_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+ALTER SEQUENCE public.saved_cards_card_id_seq OWNER TO postgres;
+
+
+--
+-- Name: saved_cards; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.saved_cards (
+    card_id integer NOT NULL DEFAULT nextval('public.saved_cards_card_id_seq'::regclass),
+    user_id uuid NOT NULL,
+    card_type character varying DEFAULT 'visa'::character varying,
+    last4 character varying NOT NULL,
+    cardholder_name character varying NOT NULL,
+    expiry character varying NOT NULL,
+    is_default boolean DEFAULT false,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE public.saved_cards OWNER TO postgres;
+
+ALTER SEQUENCE public.saved_cards_card_id_seq OWNED BY public.saved_cards.card_id;
+
+
+--
 -- TOC entry 4905 (class 2604 OID 16477)
 -- Name: chef cheff_id; Type: DEFAULT; Schema: public; Owner: postgres
 --

@@ -9,7 +9,7 @@ import 'package:khaadim/screens/payments/add_payment_screen.dart';
 import 'package:khaadim/screens/orders/order_confirmation_screen.dart';
 
 class CheckoutScreen extends StatefulWidget {
-  const CheckoutScreen({Key? key}) : super(key: key);
+  const CheckoutScreen({super.key});
 
   @override
   State<CheckoutScreen> createState() => _CheckoutScreenState();
@@ -368,7 +368,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             "Total",
                             "Rs ${total.toStringAsFixed(2)}",
                             isBold: true,
-                            color: theme.colorScheme.onBackground,
+                            color: theme.colorScheme.onSurface,
                           ),
                           if (cart.error != null) ...[
                             const SizedBox(height: 10),
@@ -446,8 +446,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             Text(
               title,
               style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: theme.colorScheme.onBackground),
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.onSurface,
+              ),
             ),
             const SizedBox(height: 12),
             child,
@@ -510,8 +511,7 @@ class _SummaryRow extends StatelessWidget {
     this.value, {
     this.isBold = false,
     this.color = Colors.grey,
-    Key? key,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

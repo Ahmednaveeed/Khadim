@@ -12,7 +12,15 @@ from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 from typing import Optional, Any
 
-from voice.transcribe import transcribe_audio
+# Voice transcription is optional - will be added later
+try:
+    from voice.transcribe import transcribe_audio
+    VOICE_ENABLED = True
+except Exception as e:
+    print(f"[WARNING] Voice transcription disabled: {e}")
+    transcribe_audio = None
+    VOICE_ENABLED = False
+
 from chat.chat_agent import get_ai_response
 from dotenv import load_dotenv
 from sqlalchemy import text
@@ -22,6 +30,7 @@ from cart.cart_routes import router as cart_router
 from orders.order_routes import router as order_router
 from agents.upsell_agent import UpsellAgent
 from agents.recommender_agent import RecommendationEngine
+from agents.custom_deal_agent import CustomDealAgent
 from auth.auth_routes import get_current_user
 from typing import Dict, List
 
@@ -33,6 +42,7 @@ _REDIS_CLIENT = redis_lib.StrictRedis(host=os.getenv("REDIS_HOST", "localhost"),
 
 upsell_agent = UpsellAgent()
 recommendation_engine = RecommendationEngine()
+custom_deal_agent = CustomDealAgent()
 
 print("DB URL = ", os.getenv("DATABASE_URL"))
 
@@ -88,10 +98,11 @@ def format_items_urdu(menu_items, deals):
 
 @app.on_event("startup")
 def warmup_whisper():
+    if not VOICE_ENABLED:
+        print("Whisper warm-up skipped: Voice feature disabled")
+        return
     print("Warming up Whisper model...")
     try:
-        from voice.transcribe import transcribe_audio
-
         base_dir = os.path.dirname(os.path.abspath(__file__))   # backend/
         project_root = os.path.dirname(base_dir)                # project root
         audio_path = os.path.join(project_root, "voice", "empty.wav")
@@ -341,6 +352,11 @@ async def chat_voice_endpoint(
     language: str = Form("ur"),
     file: UploadFile = File(...)
 ):
+    if not VOICE_ENABLED:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "Voice feature is temporarily disabled"}
+        )
     os.makedirs("temp_voice", exist_ok=True)
     audio_path = f"temp_voice/{file.filename}"
 
@@ -416,6 +432,36 @@ def get_all_deals():
         rows = conn.execute(query).mappings().all()
 
     return {"deals": rows}
+
+
+# ------------------------------
+# CUSTOM DEAL ENDPOINT
+# ------------------------------
+
+class CustomDealRequest(BaseModel):
+    query: str
+    user_id: Optional[str] = None
+
+
+@app.post("/deals/custom")
+async def create_custom_deal(req: CustomDealRequest):
+    """
+    Create a custom deal based on user's natural language query.
+    Example queries:
+    - "make a deal for 3 people with biryani and burger"
+    - "create a Pakistani food deal for 5 people"
+    - "I want fast food for 2 people"
+    """
+    if not req.query.strip():
+        return {"success": False, "message": "Please describe what kind of deal you'd like."}
+    
+    try:
+        result = custom_deal_agent.create_deal(req.query)
+        return result
+    except Exception as e:
+        print(f"[CustomDeal] Error: {e}")
+        return {"success": False, "message": "Sorry, couldn't create the deal. Please try again."}
+
 
 @app.get("/upsell")
 def get_upsell(city: str = "Islamabad"):
