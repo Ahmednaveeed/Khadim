@@ -464,6 +464,35 @@ def list_orders_for_user(user_id: str) -> List[Dict[str, Any]]:
             {"uid": user_id},
         ).mappings().all()
 
+        # Fetch items for all orders in one query
+        order_ids = [int(r["order_id"]) for r in rows]
+        items_by_order: Dict[int, List[Dict[str, Any]]] = {oid: [] for oid in order_ids}
+
+        if order_ids:
+            item_rows = conn.execute(
+                text("""
+                    SELECT
+                        id, order_id, item_type, item_id,
+                        name_snapshot, unit_price_snapshot, quantity, line_total
+                    FROM order_items
+                    WHERE order_id = ANY(:oids)
+                    ORDER BY order_id, id ASC
+                """),
+                {"oids": order_ids},
+            ).mappings().all()
+
+            for ir in item_rows:
+                oid = int(ir["order_id"])
+                items_by_order[oid].append({
+                    "id": int(ir["id"]),
+                    "item_type": ir["item_type"],
+                    "item_id": int(ir["item_id"]),
+                    "name": ir["name_snapshot"],
+                    "unit_price": float(ir["unit_price_snapshot"] or 0),
+                    "quantity": int(ir["quantity"] or 0),
+                    "line_total": float(ir["line_total"] or 0),
+                })
+
     return [
         {
             "order_id": int(r["order_id"]),
@@ -477,9 +506,11 @@ def list_orders_for_user(user_id: str) -> List[Dict[str, Any]]:
             "delivery_address": r["delivery_address"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+            "items": items_by_order.get(int(r["order_id"]), []),
         }
         for r in rows
     ]
+
 
 
 def get_order_detail_for_user(order_id: int, user_id: str) -> Dict[str, Any]:

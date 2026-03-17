@@ -157,4 +157,74 @@ def login(payload: LoginRequest):
 
 @router.get("/me")
 def me(current_user: Dict[str, Any] = Depends(get_current_user)):
-    return {"user": current_user}
+    user_id = str(current_user["user_id"])
+
+    with SQL_ENGINE.connect() as conn:
+        prefs_row = conn.execute(
+            text("SELECT preferences FROM auth.user_preferences WHERE user_id = :uid"),
+            {"user_id": user_id},
+        ).mappings().fetchone()
+        delivery_address = ""
+        if prefs_row and prefs_row["preferences"]:
+            delivery_address = prefs_row["preferences"].get("delivery_address", "") or ""
+
+        order_count = conn.execute(
+            text("""
+                SELECT COUNT(*) FROM public.orders o
+                JOIN public.cart c ON c.cart_id = o.cart_id
+                WHERE c.user_id = :uid
+            """),
+            {"uid": user_id},
+        ).scalar() or 0
+
+    return {
+        "user": {
+            **current_user,
+            "user_id": user_id,
+            "delivery_address": delivery_address,
+            "order_count": int(order_count),
+        }
+    }
+
+
+class UpdateProfileRequest(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    delivery_address: Optional[str] = None
+
+
+@router.patch("/me")
+def update_me(
+    payload: UpdateProfileRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    user_id = str(current_user["user_id"])
+
+    with SQL_ENGINE.begin() as conn:
+        updates = []
+        params: Dict[str, Any] = {"uid": user_id}
+        if payload.full_name is not None:
+            updates.append("full_name = :full_name")
+            params["full_name"] = payload.full_name.strip()
+        if payload.email is not None:
+            updates.append("email = :email")
+            params["email"] = payload.email
+        if updates:
+            conn.execute(
+                text(f"UPDATE auth.app_users SET {', '.join(updates)} WHERE user_id = :uid"),
+                params,
+            )
+
+        if payload.delivery_address is not None:
+            conn.execute(
+                text("""
+                    INSERT INTO auth.user_preferences (user_id, preferences)
+                    VALUES (:uid, jsonb_build_object('delivery_address', :addr))
+                    ON CONFLICT (user_id) DO UPDATE
+                    SET preferences = auth.user_preferences.preferences
+                        || jsonb_build_object('delivery_address', :addr)
+                """),
+                {"uid": user_id, "addr": payload.delivery_address.strip()},
+            )
+
+    return {"success": True, "message": "Profile updated"}

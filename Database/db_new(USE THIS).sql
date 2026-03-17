@@ -2590,7 +2590,6 @@ ALTER TABLE public.order_items ADD CONSTRAINT order_items_item_type_chk
         (ARRAY['menu_item'::character varying, 'deal'::character varying, 'custom_deal'::character varying])::text[]
     ));
 
-
 --- feedback for personal and custom deals ---
 
 ALTER TABLE public.feedback
@@ -2611,3 +2610,43 @@ ALTER TABLE public.feedback
 CREATE UNIQUE INDEX IF NOT EXISTS feedback_user_order_unique
     ON public.feedback (user_id, order_id)
     WHERE item_id IS NULL AND order_id IS NOT NULL;
+
+
+
+----- For testing ---
+
+SELECT * FROM public.custom_deals ORDER BY created_at DESC LIMIT 3;
+SELECT * FROM public.custom_deal_items WHERE custom_deal_id = 5;
+SELECT * FROM public.cart_items WHERE item_type = 'custom_deal';
+
+SELECT kt.task_id, kt.order_id, kt.menu_item_id, kt.item_name, kt.qty
+FROM kitchen_tasks kt
+ORDER BY kt.created_at DESC LIMIT 10;
+
+SELECT order_id, item_id, item_type, quantity
+FROM order_items
+ORDER BY order_id DESC LIMIT 10;
+
+SELECT * FROM custom_deals ORDER BY created_at DESC LIMIT 3;
+SELECT * FROM custom_deal_items ORDER BY id DESC LIMIT 10;
+
+SELECT order_id, item_id, item_type, quantity
+FROM order_items
+ORDER BY order_id DESC LIMIT 10;
+
+SELECT * FROM custom_deals ORDER BY created_at DESC LIMIT 3;
+
+SELECT * FROM feedback WHERE order_id = 18;
+
+-- ============================================================
+-- CUSTOM DEAL FEEDBACK MIGRATION
+-- ============================================================
+
+-- Add custom_deal_id column to feedback (nullable FK to custom_deals)
+ALTER TABLE public.feedback
+    ADD COLUMN IF NOT EXISTS custom_deal_id INTEGER
+    REFERENCES public.custom_deals(custom_deal_id) NULL;
+
+-- Add soft_rating column to custom_deal_items for personalization inference
+ALTER TABLE public.custom_deal_items
+    ADD COLUMN IF NOT EXISTS soft_rating INTEGER NULL;
