@@ -100,13 +100,19 @@ class CartTools:
 
     def add_item(self, cart_id: str, item_data: Dict, quantity: int = 1) -> Dict:
         """Adds an item to the database."""
-        try:            
-            # Extract data provided by Orchestrator
-            is_deal = 'deal_id' in item_data
-            item_id = item_data.get('deal_id') if is_deal else item_data.get('item_id')
-            item_type = 'deal' if is_deal else 'menu_item'
-            item_name = item_data.get('item_name')
-            price = item_data.get('price')
+        try:
+            # Read item_type from snapshot if present, otherwise fall back to
+            # the old deal_id detection (for Streamlit/Redis paths).
+            if "item_type" in item_data:
+                item_type = item_data["item_type"]
+                item_id = item_data.get("item_id") or item_data.get("deal_id")
+            else:
+                is_deal = "deal_id" in item_data
+                item_id = item_data.get("deal_id") if is_deal else item_data.get("item_id")
+                item_type = "deal" if is_deal else "menu_item"
+
+            item_name = item_data.get("item_name")
+            price = item_data.get("price")
 
             with self.db.get_connection() as conn:
                 with conn.cursor() as cur:

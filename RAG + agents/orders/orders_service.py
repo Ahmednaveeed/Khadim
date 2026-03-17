@@ -78,6 +78,36 @@ def _expand_deal_items(conn, deal_id: int, deal_qty: int) -> List[Dict[str, Any]
     return expanded
 
 
+def _expand_custom_deal_items(conn, custom_deal_id: int) -> List[Dict[str, Any]]:
+    """Expand a custom_deal into individual kitchen-ready menu item rows."""
+    rows = conn.execute(
+        text("""
+            SELECT cdi.item_id AS menu_item_id,
+                   cdi.quantity,
+                   mi.item_name,
+                   mi.item_category,
+                   mi.item_cuisine,
+                   mi.prep_time_minutes
+            FROM public.custom_deal_items cdi
+            JOIN public.menu_item mi ON mi.item_id = cdi.item_id
+            WHERE cdi.custom_deal_id = :cdid
+        """),
+        {"cdid": custom_deal_id},
+    ).mappings().all()
+
+    expanded: List[Dict[str, Any]] = []
+    for row in rows:
+        expanded.append({
+            "menu_item_id": int(row["menu_item_id"]),
+            "qty": int(row["quantity"] or 1),
+            "item_name": row["item_name"],
+            "item_category": row["item_category"],
+            "item_cuisine": row["item_cuisine"],
+            "prep_time_minutes": int(row["prep_time_minutes"] or 10),
+        })
+
+    return expanded
+
 def _create_kitchen_tasks(conn, order_id: int, cart_items: List[Dict[str, Any]]) -> int:
     kitchen_items: List[Dict[str, Any]] = []
 
@@ -111,6 +141,9 @@ def _create_kitchen_tasks(conn, order_id: int, cart_items: List[Dict[str, Any]])
 
         elif item_type == "deal":
             kitchen_items.extend(_expand_deal_items(conn, item_id, qty))
+
+        elif item_type == "custom_deal":
+            kitchen_items.extend(_expand_custom_deal_items(conn, item_id))
 
     max_prep = 0
 

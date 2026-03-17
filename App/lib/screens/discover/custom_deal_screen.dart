@@ -145,7 +145,7 @@ class _CustomDealScreenState extends State<CustomDealScreen> {
     if (_dealResponse == null || !_dealResponse!.hasItems) return;
 
     final CartProvider cartProvider =
-    Provider.of<CartProvider>(context, listen: false);
+        Provider.of<CartProvider>(context, listen: false);
     final String? cartId = cartProvider.cartId;
 
     if (cartId == null) {
@@ -158,15 +158,43 @@ class _CustomDealScreenState extends State<CustomDealScreen> {
     setState(() => _isLoading = true);
 
     try {
-      for (final CustomDealItem item in _dealResponse!.items) {
-        await CartService.addItem(
-          cartId: cartId,
-          itemType: item.itemType,
-          itemId: item.itemId,
-          quantity: item.quantity,
-        );
+      // Step 1: Persist the deal bundle and get a single custom_deal_id
+      final double standardPrice = _dealResponse!.items.fold(
+        0.0,
+        (sum, item) => sum + (item.price * item.quantity),
+      );
+      final double discountAmount =
+          (standardPrice - _dealResponse!.totalPrice).clamp(0.0, standardPrice);
+
+      final Map<String, dynamic> saveResult = await CartService.saveCustomDeal(
+        groupSize: _personCount,
+        totalPrice: _dealResponse!.totalPrice,
+        discountAmount: discountAmount,
+        items: _dealResponse!.items
+            .map((CustomDealItem item) => {
+                  'item_id': item.itemId,
+                  'item_name': item.itemName,
+                  'quantity': item.quantity,
+                  'unit_price': item.price,
+                })
+            .toList(),
+      );
+
+      final int? customDealId =
+          saveResult['custom_deal_id'] as int?;
+      if (customDealId == null) {
+        throw Exception('Server did not return a custom_deal_id');
       }
 
+      // Step 2: Add ONE locked row to cart — item_type = 'custom_deal'
+      await CartService.addItem(
+        cartId: cartId,
+        itemType: 'custom_deal',
+        itemId: customDealId,
+        quantity: 1,
+      );
+
+      // Step 3: Sync provider so cart badge and screen update
       await cartProvider.sync();
 
       if (!mounted) return;
@@ -191,6 +219,7 @@ class _CustomDealScreenState extends State<CustomDealScreen> {
       }
     }
   }
+
 
   String _cleanMessage(String msg) {
     return msg

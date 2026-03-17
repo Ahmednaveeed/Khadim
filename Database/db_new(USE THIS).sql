@@ -2,8 +2,6 @@
 -- PostgreSQL database dump
 --
 
-\restrict rdt8umbERBfvP52i0zpAMNw9xQVy08mPjR74atnWtloOzUK8vWy9tqP7bMNUOlP
-
 -- Dumped from database version 18.1
 -- Dumped by pg_dump version 18.1
 
@@ -2551,5 +2549,43 @@ ALTER TABLE ONLY public.saved_cards
 -- PostgreSQL database dump complete
 --
 
-\unrestrict rdt8umbERBfvP52i0zpAMNw9xQVy08mPjR74atnWtloOzUK8vWy9tqP7bMNUOlP
 
+-- ============================================================
+-- Custom Deal Tables — added for custom_deal cart integration
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public.custom_deals (
+    custom_deal_id  SERIAL PRIMARY KEY,
+    user_id         UUID NOT NULL REFERENCES auth.app_users(user_id) ON DELETE CASCADE,
+    group_size      INTEGER NOT NULL DEFAULT 1,
+    total_price     NUMERIC(10,2) NOT NULL,
+    discount_amount NUMERIC(10,2) NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE public.custom_deals OWNER TO postgres;
+
+
+CREATE TABLE IF NOT EXISTS public.custom_deal_items (
+    id              SERIAL PRIMARY KEY,
+    custom_deal_id  INTEGER NOT NULL REFERENCES public.custom_deals(custom_deal_id) ON DELETE CASCADE,
+    item_id         INTEGER NOT NULL REFERENCES public.menu_item(item_id),
+    item_name       TEXT NOT NULL,
+    quantity        INTEGER NOT NULL DEFAULT 1,
+    unit_price      NUMERIC(10,2) NOT NULL
+);
+
+ALTER TABLE public.custom_deal_items OWNER TO postgres;
+
+
+-- Allow item_type = 'custom_deal' in cart_items
+ALTER TABLE public.cart_items DROP CONSTRAINT IF EXISTS cart_items_item_type_chk;
+ALTER TABLE public.cart_items ADD CONSTRAINT cart_items_item_type_chk
+    CHECK (item_type = ANY (ARRAY['menu_item'::text, 'deal'::text, 'custom_deal'::text]));
+
+-- Allow item_type = 'custom_deal' in order_items
+ALTER TABLE public.order_items DROP CONSTRAINT IF EXISTS order_items_item_type_chk;
+ALTER TABLE public.order_items ADD CONSTRAINT order_items_item_type_chk
+    CHECK ((item_type)::text = ANY (
+        (ARRAY['menu_item'::character varying, 'deal'::character varying, 'custom_deal'::character varying])::text[]
+    ));

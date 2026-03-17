@@ -146,9 +146,22 @@ def process_cart_order(cart_id: str) -> dict:
             expanded = expand_deal_items(db, deal_id, qty)
             for e in expanded:
                 e["expanded_from_deal"] = name
+                e["item_type"] = "menu_item"
             kitchen_items.extend(expanded)
+
+        elif item_type == "custom_deal":
+            kitchen_items.append({
+                "menu_item_id": int(real_id),
+                "qty": qty,
+                "item_type": "custom_deal",
+            })
+
         else:
-            kitchen_items.append({"menu_item_id": int(real_id), "qty": qty})
+            kitchen_items.append({
+                "menu_item_id": int(real_id),
+                "qty": qty,
+                "item_type": "menu_item",
+            })
 
     kitchen_message = ""
     if order_id and kitchen_items:

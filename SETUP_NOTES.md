@@ -102,3 +102,14 @@ These scripts in `voice/` have hardcoded paths for training — they are one-tim
 - `voice/save_model.py`
 - `voice/finetune_whisper.py`
 - `voice/denoise.py`
+
+---
+
+## 8. Database usage
+
+- Always make changes inside vs code and not in your pg admin 
+- Then use this command (change name to your exact db name in pg admin) to make changes to your pg admin
+- All te changes will sync and eveyone will have updated db at every push 
+
+"C:\Program Files\PostgreSQL\17\bin\psql.exe" -U postgres -d KhadimDB -f "D:\FAST\FYP\Khadim\database\db_new(USE THIS).sql"
+

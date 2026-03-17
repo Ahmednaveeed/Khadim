@@ -183,25 +183,36 @@ def finalize_order_and_send_to_kitchen(cart_id: str) -> dict:
         # -------------------------
 
         # --- BUILD KITCHEN PAYLOAD ---
-        
-        # 1. If it's a Deal, we must expand it using the REAL ID
+
+        # 1. If it's a Deal, expand into individual menu items
         if item_type == "deal":
             deal_id = int(real_id)
-            # Use the helper function to look up 'deal_item' table
             expanded = expand_deal_items(db, deal_id, qty)
-            
+
             if not expanded:
                 print(f"[WARN] Deal '{name}' (ID {deal_id}) expanded to 0 items. Check deal_item table!")
-            
+
             for e in expanded:
-                # Tag it so Kitchen knows it came from a deal
                 e["expanded_from_deal"] = name
-            
+                e["item_type"] = "menu_item"  # expanded deal items are plain menu items
+
             kitchen_items.extend(expanded)
 
-        # 2. If it's a regular Menu Item
+        # 2. If it's a Custom Deal — pass as-is so kitchen_agent.expand_items() handles it
+        elif item_type == "custom_deal":
+            kitchen_items.append({
+                "menu_item_id": int(real_id),
+                "qty": qty,
+                "item_type": "custom_deal",
+            })
+
+        # 3. Regular Menu Item
         else:
-            kitchen_items.append({"menu_item_id": int(real_id), "qty": qty})
+            kitchen_items.append({
+                "menu_item_id": int(real_id),
+                "qty": qty,
+                "item_type": "menu_item",
+            })
 
     # 4) Send Corrected Payload to Kitchen
     kitchen_message = ""

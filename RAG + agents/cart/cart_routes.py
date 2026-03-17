@@ -18,7 +18,7 @@ router = APIRouter(prefix="/cart", tags=["cart"])
 
 cart_tools = CartTools()
 
-ItemType = Literal["menu_item", "deal"]
+ItemType = Literal["menu_item", "deal", "custom_deal"]
 
 
 class CreateCartResponse(BaseModel):
@@ -127,6 +127,7 @@ def _fetch_item_snapshot(item_type: str, item_id: int) -> Dict[str, Any]:
             "item_id": int(row["item_id"]),
             "item_name": row["item_name"],
             "price": float(row["item_price"]),
+            "item_type": "menu_item",
         }
 
     if item_type == "deal":
@@ -141,11 +142,32 @@ def _fetch_item_snapshot(item_type: str, item_id: int) -> Dict[str, Any]:
         if not row:
             raise HTTPException(status_code=404, detail="Deal not found")
 
-        # CartTools uses deal_id to detect deal
         return {
             "deal_id": int(row["deal_id"]),
-            "item_name": row["deal_name"],   # CartTools expects item_name
+            "item_name": row["deal_name"],
             "price": float(row["deal_price"]),
+            "item_type": "deal",
+        }
+
+    if item_type == "custom_deal":
+        q = text("""
+            SELECT custom_deal_id, total_price, group_size
+            FROM public.custom_deals
+            WHERE custom_deal_id = :id
+            LIMIT 1
+        """)
+        with SQL_ENGINE.connect() as conn:
+            row = conn.execute(q, {"id": item_id}).mappings().fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Custom deal not found")
+
+        group_size = int(row["group_size"] or 1)
+        label = f"Custom Deal (for {group_size} {'person' if group_size == 1 else 'people'})"
+        return {
+            "item_id": int(row["custom_deal_id"]),
+            "item_name": label,
+            "price": float(row["total_price"]),
+            "item_type": "custom_deal",
         }
 
     raise HTTPException(status_code=400, detail="Invalid item_type")

@@ -303,6 +303,36 @@ def infer_station(category, cuisine):
     return "GENERAL"
 
 # =========================================================
+#   CUSTOM DEAL EXPANDER
+# =========================================================
+
+def expand_items(items):
+    """Replace any custom_deal entry with its actual menu items."""
+    expanded = []
+    for entry in items:
+        if entry.get("item_type") == "custom_deal":
+            sql = """
+                SELECT item_id, quantity
+                FROM public.custom_deal_items
+                WHERE custom_deal_id = %s
+            """
+            db = get_db_instance()
+            with db.get_connection() as conn:
+                with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                    cur.execute(sql, (entry["menu_item_id"],))
+                    rows = cur.fetchall()
+            for row in rows:
+                expanded.append({
+                    "menu_item_id": row["item_id"],
+                    "qty": row["quantity"],
+                    "item_type": "menu_item"
+                })
+        else:
+            expanded.append(entry)
+    return expanded
+
+
+# =========================================================
 #   KITCHEN ORDER PLANNER
 # =========================================================
 
@@ -312,6 +342,9 @@ def plan_order(payload):
 
     order_id = payload.get("order_id")
     items = payload.get("items", [])
+
+    # Expand any custom_deal entries into their individual menu items
+    items = expand_items(items)
 
     tasks = []
     cached_chefs = {}

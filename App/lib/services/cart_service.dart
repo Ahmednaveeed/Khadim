@@ -40,6 +40,26 @@ class CartService {
     );
   }
 
+  /////// SAVE CUSTOM DEAL BUNDLE ///////
+  static Future<Map<String, dynamic>> saveCustomDeal({
+    required int groupSize,
+    required double totalPrice,
+    required double discountAmount,
+    required List<Map<String, dynamic>> items,
+  }) async {
+    return ApiClient.postJson(
+      "/custom-deal/save",
+      auth: true,
+      body: {
+        "group_size": groupSize,
+        "total_price": totalPrice,
+        "discount_amount": discountAmount,
+        "items": items,
+      },
+    );
+  }
+
+
   /////// SET QTY ///////
   static Future<Map<String, dynamic>> setQuantity({
     required String cartId,

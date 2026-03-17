@@ -28,6 +28,8 @@ from sqlalchemy import text
 
 from cart.cart_routes import router as cart_router
 from orders.order_routes import router as order_router
+from feedback.feedback_routes import router as feedback_router
+from custom_deal.custom_deal_routes import router as custom_deal_router
 from agents.upsell_agent import UpsellAgent
 from agents.recommender_agent import RecommendationEngine
 from agents.custom_deal_agent import CustomDealAgent
@@ -55,6 +57,8 @@ app = FastAPI()
 app.include_router(auth_router)
 app.include_router(cart_router)
 app.include_router(order_router)
+app.include_router(feedback_router)
+app.include_router(custom_deal_router)
 
 
 # CORS for Flutter
