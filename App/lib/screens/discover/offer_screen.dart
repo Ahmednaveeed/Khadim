@@ -21,6 +21,38 @@ class _OffersScreenState extends State<OffersScreen> {
   List<DealModel> deals = [];
   bool loading = true;
 
+  // ── Deal filters ────────────────────────────────────────────
+  String _searchQuery = '';
+  String _selectedCuisine = 'All';
+  String _selectedServing = 'All';
+
+  static const List<String> _cuisineFilters = [
+    'All', 'Fast Food', 'Chinese', 'BBQ', 'Desi',
+  ];
+  static const List<String> _servingFilters = [
+    'All', '1', '2', '3', '4', '5+',
+  ];
+
+  List<DealModel> get _filteredDeals {
+    return deals.where((d) {
+      final q = _searchQuery.toLowerCase();
+      final matchesSearch = q.isEmpty ||
+          d.dealName.toLowerCase().contains(q) ||
+          d.items.toLowerCase().contains(q);
+
+      final matchesCuisine = _selectedCuisine == 'All' ||
+          d.dealName.toLowerCase().contains(_selectedCuisine.toLowerCase().replaceAll(' ', ''))  ||
+          d.dealName.toLowerCase().startsWith(_selectedCuisine.split(' ').first.toLowerCase());
+
+      final matchesServing = _selectedServing == 'All' || (() {
+        if (_selectedServing == '5+') return d.servingSize >= 5;
+        return d.servingSize == int.tryParse(_selectedServing);
+      })();
+
+      return matchesSearch && matchesCuisine && matchesServing;
+    }).toList();
+  }
+
   /// Map offer category -> banner image
   final Map<String, String> offerBannerImages = const {
     "Fast Food": "assets/images/deals/deal_fastfood.jpeg",
@@ -258,18 +290,104 @@ class _OffersScreenState extends State<OffersScreen> {
               ),
               const SizedBox(height: 12),
 
-              ...deals.map((deal) {
-                final img = dealImages[deal.dealName] ??
-                    offerBannerImages["Fast Food"]!;
-
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 16),
-                  child: _DealCard(
-                    deal: deal,
-                    image: img,
+              // Search bar
+              TextField(
+                onChanged: (v) => setState(() => _searchQuery = v),
+                decoration: InputDecoration(
+                  hintText: 'Search deals…',
+                  prefixIcon: const Icon(Icons.search),
+                  filled: true,
+                  fillColor: theme.colorScheme.surface,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
                   ),
-                );
-              }),
+                  contentPadding: const EdgeInsets.symmetric(
+                      vertical: 10, horizontal: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // Cuisine filter chips
+              SizedBox(
+                height: 38,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: _cuisineFilters.map((c) {
+                    final selected = c == _selectedCuisine;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(c),
+                        selected: selected,
+                        onSelected: (_) =>
+                            setState(() => _selectedCuisine = c),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 8),
+
+              // Serving size filter chips
+              SizedBox(
+                height: 38,
+                child: ListView(
+                  scrollDirection: Axis.horizontal,
+                  children: _servingFilters.map((s) {
+                    final selected = s == _selectedServing;
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(s == 'All' ? 'All Sizes' : '$s Person'),
+                        selected: selected,
+                        onSelected: (_) =>
+                            setState(() => _selectedServing = s),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              // Results count
+              if (_searchQuery.isNotEmpty ||
+                  _selectedCuisine != 'All' ||
+                  _selectedServing != 'All')
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '${_filteredDeals.length} deal${_filteredDeals.length == 1 ? '' : 's'} found',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.hintColor),
+                  ),
+                ),
+
+              if (_filteredDeals.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 32),
+                  child: Center(
+                    child: Column(
+                      children: [
+                        const Icon(Icons.search_off,
+                            size: 48, color: Colors.grey),
+                        const SizedBox(height: 8),
+                        Text('No deals match your filters',
+                            style: theme.textTheme.bodyMedium
+                                ?.copyWith(color: Colors.grey)),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                ..._filteredDeals.map((deal) {
+                  final img = dealImages[deal.dealName] ??
+                      offerBannerImages["Fast Food"]!;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: _DealCard(deal: deal, image: img),
+                  );
+                }),
             ],
           ),
         ),

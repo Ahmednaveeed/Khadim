@@ -2650,3 +2650,23 @@ ALTER TABLE public.feedback
 -- Add soft_rating column to custom_deal_items for personalization inference
 ALTER TABLE public.custom_deal_items
     ADD COLUMN IF NOT EXISTS soft_rating INTEGER NULL;
+
+-- ============================================================
+-- FAVOURITES TABLE
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.favourites (
+    favourite_id   SERIAL PRIMARY KEY,
+    user_id        UUID NOT NULL REFERENCES auth.app_users(user_id) ON DELETE CASCADE,
+    item_id        INTEGER REFERENCES public.menu_item(item_id) ON DELETE CASCADE NULL,
+    deal_id        INTEGER REFERENCES public.deal(deal_id) ON DELETE CASCADE NULL,
+    custom_deal_id INTEGER REFERENCES public.custom_deals(custom_deal_id) ON DELETE CASCADE NULL,
+    created_at     TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fav_one_type_only CHECK (
+        (item_id IS NOT NULL)::int +
+        (deal_id IS NOT NULL)::int +
+        (custom_deal_id IS NOT NULL)::int = 1
+    ),
+    CONSTRAINT fav_unique_user_item UNIQUE (user_id, item_id),
+    CONSTRAINT fav_unique_user_deal UNIQUE (user_id, deal_id),
+    CONSTRAINT fav_unique_user_custom_deal UNIQUE (user_id, custom_deal_id)
+);
