@@ -1129,15 +1129,20 @@ if __name__ == "__main__":
 - [ ] `recommendation_fallback.py` orchestrates fallback logic
 - [ ] Popularity-based recommendations as final fallback
 - [ ] API endpoint `/personalization/recommendations` returns combined results
-- [ ] Fake user seeding script (`seed_fake_users.py`) ready
 - [ ] LLM reasoning layer stubbed (still returns scores without LLM)
 
 **Testing:**
-- Run seeding script; verify 75 fake users exist with orders/ratings
-- Verify collab filter finds similar users when enough data
-- Verify fallback to FAISS when collab weak
-- Verify fallback to popularity when both weak
-- Check FAISS returns correct neighbors
+- Verify FAISS returns correct neighbors using real menu item vectors
+- Verify collab filter gracefully skips when user data is sparse (expected with few users)
+- Verify fallback chain works: Collab Filter → FAISS → Popularity
+- Verify popularity fallback returns ranked results from real order data
+- Verify `/personalization/recommendations` endpoint returns combined results
+
+**Notes:**
+- Fake user seeding skipped intentionally — real users will be added organically
+- Collab filter will naturally fall back to FAISS/popularity during early stage (cold-start scenario)
+- Seed fake users only if needed later in a separate test environment
+
 
 ---
 
