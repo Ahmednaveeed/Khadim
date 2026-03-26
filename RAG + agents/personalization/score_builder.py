@@ -24,14 +24,20 @@ logger = logging.getLogger(__name__)
 class ScoreBuilder:
     """Builds / refreshes a user preference profile."""
 
-    # ── Scoring weights (from implementation plan Layer 2) ────
+    # ── Scoring weights ───────────────────────────────────────
     WEIGHT_FAVOURITE = 40
-    WEIGHT_RATING_HIGH = 30       # rating >= 4
-    WEIGHT_RATING_MID = 10        # rating 2-3
-    WEIGHT_RATING_LOW = -40       # rating <= 1
+    WEIGHT_SOFT_RATING = 15
     WEIGHT_ORDER_FREQUENT = 20    # ordered 3+ times (× decay)
     WEIGHT_ORDER_OCCASIONAL = 10  # ordered 1-2 times (× decay)
-    WEIGHT_SOFT_RATING = 15       # soft_rating >= 4
+
+    # Granular rating → score map (replaces HIGH/MID/LOW constants)
+    RATING_SCORE_MAP = {
+        1: -40,
+        2: -20,
+        3:   0,
+        4:  20,
+        5:  50,
+    }
 
     def __init__(self, db_conn):
         """
@@ -219,24 +225,32 @@ class ScoreBuilder:
                 _ensure(iid)
                 scores[iid] += self.WEIGHT_FAVOURITE
 
-        # ── Feedback ratings ─────────────────────────────────────
-        # Aggregate per item (average rating)
-        item_ratings: Dict[int, List[int]] = {}
+        # ── Feedback ratings (recency-weighted) ──────────────────
+        item_ratings: Dict[int, List[Dict]] = {}
         for fb in signals.get("feedback", []):
             iid = fb.get("item_id")
             rating = fb.get("rating")
+            created_at = fb.get("created_at")
             if iid is not None and rating is not None:
-                item_ratings.setdefault(iid, []).append(int(rating))
+                item_ratings.setdefault(iid, []).append(
+                    {"rating": int(rating), "created_at": created_at}
+                )
 
-        for iid, ratings in item_ratings.items():
+        for iid, feedbacks in item_ratings.items():
             _ensure(iid)
-            avg = sum(ratings) / len(ratings)
-            if avg >= 4:
-                scores[iid] += self.WEIGHT_RATING_HIGH
-            elif avg >= 2:
-                scores[iid] += self.WEIGHT_RATING_MID
-            if avg <= 1:
-                scores[iid] += self.WEIGHT_RATING_LOW
+            sorted_fb = sorted(
+                feedbacks,
+                key=lambda x: x["created_at"] or datetime.min.replace(tzinfo=timezone.utc),
+                reverse=True,
+            )
+            if len(sorted_fb) == 1:
+                weighted_avg = sorted_fb[0]["rating"]
+            else:
+                recent = sorted_fb[0]["rating"]
+                rest_avg = sum(f["rating"] for f in sorted_fb[1:]) / len(sorted_fb[1:])
+                weighted_avg = round(0.6 * recent + 0.4 * rest_avg)
+            weighted_avg = max(1, min(5, weighted_avg))  # clamp 1-5
+            scores[iid] += self.RATING_SCORE_MAP[weighted_avg]
 
         # ── Order frequency with time decay ──────────────────────
         item_order_info: Dict[int, List[int]] = {}   # item_id → [days_ago, …]
@@ -305,16 +319,14 @@ class ScoreBuilder:
             if did is not None:
                 deal_scores[did] = deal_scores.get(did, 0) + self.WEIGHT_FAVOURITE
 
-        # Deal feedback
+        # Deal feedback — use same RATING_SCORE_MAP for consistency
         for fb in signals.get("feedback", []):
             did = fb.get("deal_id")
             rating = fb.get("rating")
             if did is not None and rating is not None:
                 deal_scores.setdefault(did, 0)
-                if int(rating) >= 4:
-                    deal_scores[did] += self.WEIGHT_RATING_HIGH
-                elif int(rating) >= 2:
-                    deal_scores[did] += self.WEIGHT_RATING_MID
+                clamped = max(1, min(5, int(rating)))
+                deal_scores[did] += self.RATING_SCORE_MAP[clamped]
 
         sorted_ids = sorted(deal_scores, key=deal_scores.get, reverse=True)[:limit]  # type: ignore[arg-type]
         result: List[Dict[str, Any]] = []
@@ -372,19 +384,19 @@ class ScoreBuilder:
         return sorted(cuisine_counts, key=cuisine_counts.get, reverse=True)[:5]  # type: ignore[arg-type]
 
     def _extract_disliked_items(self, signals: dict, scores: Dict[int, float]) -> list:
-        """Items with rating ≤2 OR composite score < -10."""
+        """Items with rating ≤2 OR composite score < -15."""
         disliked: set = set()
 
-        # Items rated ≤2
+        # Items rated ≤2 (maps to RATING_SCORE_MAP[-20] or [-40])
         for fb in signals.get("feedback", []):
             iid = fb.get("item_id")
             rating = fb.get("rating")
             if iid is not None and rating is not None and int(rating) <= 2:
                 disliked.add(iid)
 
-        # Items with overall score < -10
+        # Items whose composite score dropped below -15
         for iid, sc in scores.items():
-            if sc < -10:
+            if sc < -15:
                 disliked.add(iid)
 
         return sorted(disliked)

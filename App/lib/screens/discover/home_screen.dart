@@ -96,57 +96,55 @@ class _HomeScreenState extends State<HomeScreen> {
               FutureBuilder<RecommendationResult>(
                 future: _recommendationFuture,
                 builder: (ctx, snapshot) {
-                  // Only show empty state when data is loaded and BOTH sections are empty
-                  if (snapshot.connectionState != ConnectionState.done) {
-                    return const SizedBox.shrink();
-                  }
                   final result = snapshot.data;
-                  final hasItems = result != null && result.recommendedItems.isNotEmpty;
-                  final hasDeals = result != null && result.recommendedDeals.isNotEmpty;
-                  if (hasItems || hasDeals) return const SizedBox.shrink();
+                  final isNewUser =
+                      snapshot.connectionState == ConnectionState.done &&
+                      result != null &&
+                      result.source == 'new_user';
 
-                  // New user — no data yet
-                  return Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 20),
-                    padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
-                    decoration: BoxDecoration(
-                      color: Theme.of(ctx).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: Theme.of(ctx).colorScheme.outline.withOpacity(0.15),
+                  if (isNewUser) {
+                    return Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 24),
+                      padding: const EdgeInsets.all(24),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                    ),
-                    child: Column(
-                      children: [
-                        const Text('🍽️', style: TextStyle(fontSize: 48)),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Your personalized feed is waiting!',
-                          style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.restaurant_menu_outlined,
+                              size: 48, color: Colors.grey),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Your personalized feed is empty',
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16),
                           ),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          'Order and rate a few items to unlock\nyour personalized recommendations.',
-                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(ctx).colorScheme.onSurface.withOpacity(0.55),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Order and rate items to unlock recommendations tailored just for you! 🍽️',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                                color: Colors.grey.shade600, fontSize: 13),
                           ),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  // Normal state — show both personalization sections
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      RecommendedForYouSection(future: _recommendationFuture),
+                      const SizedBox(height: 20),
+                      DealsYouLoveSection(future: _recommendationFuture),
+                      const SizedBox(height: 20),
+                    ],
                   );
                 },
               ),
-
-              RecommendedForYouSection(future: _recommendationFuture),
-              const SizedBox(height: 20),
-
-              DealsYouLoveSection(future: _recommendationFuture),
-              const SizedBox(height: 20),
             ],
           ),
         ),

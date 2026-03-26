@@ -99,13 +99,24 @@ class PersonalizationAgent:
             # 0. Ensure profile exists & fresh
             self.fallback._ensure_fresh_profile(user_id)
 
+            # New user check — no interaction history yet
+            profile = self._fetch_full_profile(user_id)
+            if not profile or (not profile.get("top_items") and not profile.get("disliked_items")):
+                return {
+                    "recommended_items": [],
+                    "recommended_deals": [],
+                    "source": "new_user",
+                    "message": "Order and rate items to unlock your personalized feed!",
+                    "from_cache": False,
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                }
+
             # 1. Check cache first
             cached = self.fallback._check_cache(user_id)
             if cached is not None:
                 return cached
 
-            # 2. Gather all signals
-            profile = self._fetch_full_profile(user_id)
+            # 2. Gather all signals (profile already fetched above)
             faiss_results = self.similarity.find_similar(user_id, top_k=top_k)
 
             # 3. Fetch available menu items and deals for the LLM context
@@ -123,13 +134,24 @@ class PersonalizationAgent:
                     # Validate IDs against DB
                     llm_result = self._validate_ids(llm_result, available_items, available_deals)
 
+                    # Post-LLM disliked filter — safety net in case LLM ignored the rule
+                    disliked: Set[int] = set(profile.get("disliked_items", []))
+                    llm_result["recommended_items"] = [
+                        i for i in llm_result.get("recommended_items", [])
+                        if i.get("item_id") not in disliked
+                    ]
+                    llm_result["recommended_deals"] = [
+                        d for d in llm_result.get("recommended_deals", [])
+                        if d.get("deal_id") not in disliked
+                    ]
+
                     # Hard-cap results regardless of what the LLM returned
-                    llm_result["recommended_items"] = llm_result.get("recommended_items", [])[:5]
-                    llm_result["recommended_deals"] = llm_result.get("recommended_deals", [])[:3]
+                    llm_result["recommended_items"] = llm_result["recommended_items"][:5]
+                    llm_result["recommended_deals"] = llm_result["recommended_deals"][:3]
 
                     result = {
-                        "recommended_items": llm_result.get("recommended_items", []),
-                        "recommended_deals": llm_result.get("recommended_deals", []),
+                        "recommended_items": llm_result["recommended_items"],
+                        "recommended_deals": llm_result["recommended_deals"],
                         "source": "llm_personalization",
                         "from_cache": False,
                         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -169,6 +191,7 @@ class PersonalizationAgent:
                 available_items, available_deals,
             )
 
+            disliked_ids = profile.get("disliked_items", [])
             prompt = f"""You are a restaurant recommendation AI for Khadim restaurant.
 Analyze this user's preferences and the recommendation signals below,
 then select the best 5 menu items and up to 3 deals to recommend.
@@ -178,11 +201,12 @@ then select the best 5 menu items and up to 3 deals to recommend.
 RULES:
 - ONLY recommend items/deals from the "Available" lists provided above.
 - Use the exact item_id / deal_id from those lists.
-- Exclude any items in the user's disliked list.
 - For each recommendation, write a short, friendly reason (1 sentence).
 - Score each recommendation 0-100 based on confidence.
 - Prioritize high-confidence matches.
 - Match deals to the user's preferred cuisines when possible. Always recommend at least 1 deal if any deals match the user's cuisine preference.
+
+HARD RULE: Never include any item whose item_id is in this disliked list: {disliked_ids}. This cannot be overridden.
 
 Output MUST be valid JSON with this EXACT structure (no markdown, no extra text):
 {{

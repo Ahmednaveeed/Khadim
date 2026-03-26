@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import 'package:khaadim/models/offer_model.dart';
 import 'package:khaadim/models/deal_model.dart';
 import 'package:khaadim/services/offer_service.dart';
 import 'package:khaadim/services/deal_service.dart';
 import 'package:khaadim/services/favorites_service.dart';
+import 'package:khaadim/providers/cart_provider.dart';
 
 class OffersScreen extends StatefulWidget {
   const OffersScreen({super.key});
@@ -594,7 +596,7 @@ class _OffersScreenState extends State<OffersScreen> {
                           vertical: 6,
                         ),
                       ),
-                      child: const Text("Add"),
+                      child: const Text('Add'),
                     ),
                   ],
                 ),
@@ -779,7 +781,16 @@ class _DealCardState extends State<_DealCard> {
                       ),
                     ),
                     ElevatedButton(
-                      onPressed: () {},
+                      onPressed: () {
+                        context.read<CartProvider>().addDeal(widget.deal);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('${widget.deal.dealName} added to cart'),
+                            behavior: SnackBarBehavior.floating,
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.orangeAccent,
                         foregroundColor: Colors.white,

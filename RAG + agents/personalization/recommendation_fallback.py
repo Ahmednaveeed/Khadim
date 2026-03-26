@@ -85,6 +85,11 @@ class RecommendationFallback:
             # 3. Fetch top deals from profile (score-based)
             deals = self._get_top_deals(user_id)
 
+            # Filter disliked items from both lists
+            disliked = self._get_disliked_set(user_id)
+            items = [i for i in items if i.get("item_id") not in disliked]
+            deals = [d for d in deals if d.get("deal_id") not in disliked]
+
             # 4. Add human-readable reasons
             items = self._add_reasons(items, source)
 
@@ -125,8 +130,11 @@ class RecommendationFallback:
         # Tier 1: FAISS Similarity — discovers items similar to user's preferences
         faiss_results = self.similarity.find_similar(user_id, top_k=top_k)
         if faiss_results:
-            logger.info("User %s: using FAISS similarity (%d items)", user_id, len(faiss_results))
-            return faiss_results, "faiss_similarity"
+            disliked = self._get_disliked_set(user_id)
+            faiss_results = [r for r in faiss_results if r.get("item_id") not in disliked]
+            logger.info("User %s: using FAISS similarity (%d items after disliked filter)", user_id, len(faiss_results))
+            if faiss_results:
+                return faiss_results, "faiss_similarity"
 
         # Tier 2: Score-based — direct profile items (fallback if FAISS unavailable)
         profile_items = self._get_scored_items(user_id, top_k)
@@ -421,6 +429,25 @@ class RecommendationFallback:
         except Exception:
             pass
         return None
+
+    def _get_disliked_set(self, user_id: str) -> set:
+        """Return the set of disliked item_ids for a user (from their profile)."""
+        try:
+            with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT disliked_items FROM public.user_profiles WHERE user_id = %s",
+                    (user_id,),
+                )
+                row = cur.fetchone()
+            if not row or not row["disliked_items"]:
+                return set()
+            items = row["disliked_items"]
+            if isinstance(items, str):
+                items = json.loads(items)
+            return set(items)
+        except Exception:
+            logger.exception("Failed to fetch disliked set for user %s", user_id)
+            return set()
 
     # ─────────────────────────────────────────────────────────────
     # Reason generation (deterministic — no LLM)
