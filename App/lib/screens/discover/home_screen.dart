@@ -93,6 +93,55 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 20),
 
               // ── Phase 4: AI-Personalized sections ──
+              FutureBuilder<RecommendationResult>(
+                future: _recommendationFuture,
+                builder: (ctx, snapshot) {
+                  // Only show empty state when data is loaded and BOTH sections are empty
+                  if (snapshot.connectionState != ConnectionState.done) {
+                    return const SizedBox.shrink();
+                  }
+                  final result = snapshot.data;
+                  final hasItems = result != null && result.recommendedItems.isNotEmpty;
+                  final hasDeals = result != null && result.recommendedDeals.isNotEmpty;
+                  if (hasItems || hasDeals) return const SizedBox.shrink();
+
+                  // New user — no data yet
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 20),
+                    padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: Theme.of(ctx).colorScheme.surface,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: Theme.of(ctx).colorScheme.outline.withOpacity(0.15),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text('🍽️', style: TextStyle(fontSize: 48)),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Your personalized feed is waiting!',
+                          style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Order and rate a few items to unlock\nyour personalized recommendations.',
+                          style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(ctx).colorScheme.onSurface.withOpacity(0.55),
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
               RecommendedForYouSection(future: _recommendationFuture),
               const SizedBox(height: 20),
 

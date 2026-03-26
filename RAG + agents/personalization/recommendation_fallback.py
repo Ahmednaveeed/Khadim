@@ -88,6 +88,10 @@ class RecommendationFallback:
             # 4. Add human-readable reasons
             items = self._add_reasons(items, source)
 
+            # Hard-cap to match LLM path limits
+            items = items[:5]
+            deals = deals[:3]
+
             result = {
                 "recommended_items": items,
                 "recommended_deals": deals,
@@ -114,22 +118,23 @@ class RecommendationFallback:
         self, user_id: str, top_k: int
     ) -> Tuple[List[Dict[str, Any]], str]:
         """
-        Try FAISS similarity → score-based → popularity.
-        Returns (items_list, source_string).
+        Try FAISS similarity (discovery) → score-based (fallback) → popularity.
+        FAISS uses the user's scored profile items as seeds and returns SIMILAR
+        but new items — giving discovery rather than exact repeats.
         """
-        # Tier 1: FAISS Similarity
+        # Tier 1: FAISS Similarity — discovers items similar to user's preferences
         faiss_results = self.similarity.find_similar(user_id, top_k=top_k)
         if faiss_results:
             logger.info("User %s: using FAISS similarity (%d items)", user_id, len(faiss_results))
             return faiss_results, "faiss_similarity"
 
-        # Tier 2: Score-based from profile
+        # Tier 2: Score-based — direct profile items (fallback if FAISS unavailable)
         profile_items = self._get_scored_items(user_id, top_k)
         if profile_items:
             logger.info("User %s: using score-based from profile (%d items)", user_id, len(profile_items))
             return profile_items, "score_based"
 
-        # Tier 3: Popularity
+        # Tier 3: Popularity (last resort)
         logger.info("User %s: falling back to popularity", user_id)
         pop = self._popularity_items(user_id, top_k)
         return pop, "popularity_based"
@@ -247,25 +252,74 @@ class RecommendationFallback:
         except Exception:
             return []
 
-    def _get_top_deals(self, user_id: str) -> List[Dict[str, Any]]:
-        """Return top_deals from user_profiles."""
+    def _get_top_deals(self, user_id: str, limit: int = 3) -> List[Dict[str, Any]]:
+        """
+        Hybrid deal recommendation:
+        1. Explicitly scored deals from the user's interaction history.
+        2. Fill remaining slots with deals that match preferred_cuisines —
+           so if a user likes BBQ items but has no BBQ deal scored, they still
+           get BBQ deals recommended.
+        """
+        seen_ids: set = set()
+        results: List[Dict[str, Any]] = []
         try:
             with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
-                    "SELECT top_deals FROM public.user_profiles WHERE user_id = %s",
+                    "SELECT top_deals, preferred_cuisines FROM public.user_profiles WHERE user_id = %s",
                     (user_id,),
                 )
                 row = cur.fetchone()
-            if not row or not row["top_deals"]:
+
+            if not row:
                 return []
-            deals = row["top_deals"]
-            if isinstance(deals, str):
-                deals = json.loads(deals)
-            for d in deals:
+
+            # 1. Explicitly scored deals
+            scored = row["top_deals"] or []
+            if isinstance(scored, str):
+                scored = json.loads(scored)
+            for d in scored[:limit]:
                 d["source"] = "score_based"
-            return deals
+                seen_ids.add(d.get("deal_id"))
+                results.append(d)
+
+            # 2. Fill with cuisine-matched deals if we have space
+            if len(results) < limit:
+                cuisines = row["preferred_cuisines"] or []
+                if isinstance(cuisines, str):
+                    cuisines = json.loads(cuisines)
+                if cuisines:
+                    needed = limit - len(results)
+                    exclude = list(seen_ids) if seen_ids else [0]
+                    with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                        cur.execute(
+                            """
+                            SELECT DISTINCT ON (d.deal_id)
+                                   d.deal_id, d.deal_name,
+                                   d.deal_price AS score,
+                                   mi.item_cuisine
+                              FROM public.deal d
+                              JOIN public.deal_item di ON di.deal_id = d.deal_id
+                              JOIN public.menu_item mi ON mi.item_id = di.menu_item_id
+                             WHERE mi.item_cuisine = ANY(%s)
+                               AND d.deal_id != ALL(%s)
+                             ORDER BY d.deal_id
+                             LIMIT %s
+                            """,
+                            (cuisines, exclude, needed),
+                        )
+                        cuisine_deals = cur.fetchall()
+                    for d in cuisine_deals:
+                        results.append({
+                            "deal_id": d["deal_id"],
+                            "deal_name": d["deal_name"],
+                            "score": float(d["score"]),
+                            "source": "cuisine_matched",
+                            "reason": f"Popular {d['item_cuisine']} deal matching your taste",
+                        })
         except Exception:
-            return []
+            self.conn.rollback()
+            logger.exception("Failed to fetch top deals for user %s", user_id)
+        return results[:limit]
 
     # ─────────────────────────────────────────────────────────────
     # Popularity fallback
@@ -378,17 +432,18 @@ class RecommendationFallback:
     ) -> List[Dict[str, Any]]:
         """Add a human-readable reason string to each item."""
         for item in items:
-            if source == "collaborative_filtering":
-                count = item.get("liked_by_count", 0)
-                item["reason"] = f"Users with similar tastes loved this ({count} similar users)"
-            elif source == "faiss_similarity":
-                seed = item.get("seed_item", "your favourites")
-                item["reason"] = f"Similar to {seed}"
+            if source == "faiss_similarity":
+                seed = item.get("seed_item", "")
+                if seed:
+                    item["reason"] = f"You liked {seed} — you'll probably enjoy this too"
+                else:
+                    item["reason"] = "Similar to items you've enjoyed before"
             elif source == "score_based":
-                score = item.get("score", 0)
-                item["reason"] = f"Based on your preferences (score: {score})"
+                item["reason"] = "A top pick based on what you've loved before"
             elif source == "popularity_based":
-                item["reason"] = "Trending this week"
+                item["reason"] = "Trending this week 🔥"
+            elif source == "collaborative_filtering":
+                item["reason"] = "People with your taste loved this"
             else:
                 item["reason"] = "Recommended for you"
         return items

@@ -46,9 +46,14 @@ class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
 
   Future<void> _addDeal(RecommendedDeal deal) async {
     final cartId = context.read<CartProvider>().cartId;
-    if (cartId == null) return;
+    if (cartId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cart not ready, please try again.'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
 
-    setState(() => _adding.add(deal.dealId));
+    setState(() { _adding.add(deal.dealId); });
 
     try {
       await CartService.addItem(
@@ -62,15 +67,24 @@ class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text("${deal.dealName} added!"),
+            content: Text('${deal.dealName} added!'),
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 1),
           ),
         );
       }
-    } catch (_) {
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not add ${deal.dealName}: $e'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     } finally {
-      if (mounted) setState(() => _adding.remove(deal.dealId));
+      if (mounted) setState(() { _adding.remove(deal.dealId); });
     }
   }
 

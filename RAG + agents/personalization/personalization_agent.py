@@ -427,12 +427,13 @@ Output MUST be valid JSON with this EXACT structure (no markdown, no extra text)
                            STRING_AGG(DISTINCT mi.item_cuisine, ', ') AS cuisine
                       FROM public.deal d
                       LEFT JOIN public.deal_item di ON di.deal_id = d.deal_id
-                      LEFT JOIN public.menu_item mi ON mi.item_id = di.item_id
+                      LEFT JOIN public.menu_item mi ON mi.item_id = di.menu_item_id
                      GROUP BY d.deal_id, d.deal_name, d.deal_price
                      ORDER BY d.deal_id
                     """
                 )
                 return [dict(r) for r in cur.fetchall()]
         except Exception:
+            self.conn.rollback()  # Clear aborted-transaction state so subsequent queries still work
             logger.exception("Failed to fetch deals")
             return []
