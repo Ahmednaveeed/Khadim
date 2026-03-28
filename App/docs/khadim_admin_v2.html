@@ -1,0 +1,638 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Khadim — Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Inter',sans-serif;background:#07090f;color:#e2e8f0;display:flex;height:100vh;overflow:hidden;font-size:14px;}
+
+/* ── SIDEBAR ── */
+.sidebar{width:220px;background:#0d111c;display:flex;flex-direction:column;border-right:1px solid #1a2035;flex-shrink:0;}
+.logo-wrap{padding:24px 20px 20px;border-bottom:1px solid #1a2035;}
+.logo-wrap .logo{font-size:17px;font-weight:700;color:#fff;letter-spacing:.3px;}
+.logo-wrap .logo span{color:#6366f1;}
+.logo-wrap .role{font-size:11px;color:#3d4a6b;margin-top:3px;letter-spacing:.5px;text-transform:uppercase;}
+.nav{flex:1;padding:14px 10px;}
+.nav-label{font-size:10px;color:#3d4a6b;letter-spacing:.8px;text-transform:uppercase;padding:14px 10px 6px;}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;cursor:pointer;color:#5a6a8a;font-size:13px;font-weight:500;transition:all .15s;margin-bottom:1px;}
+.nav-item:hover{background:#131929;color:#c8d0e7;}
+.nav-item.active{background:#13183a;color:#818cf8;}
+.nav-item svg{width:16px;height:16px;flex-shrink:0;opacity:.7;}
+.nav-item.active svg{opacity:1;}
+.sidebar-footer{padding:14px 10px;border-top:1px solid #1a2035;}
+.user-row{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:7px;}
+.user-avatar{width:30px;height:30px;border-radius:50%;background:#13183a;border:1px solid #2a3558;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:#818cf8;}
+.user-info .uname{font-size:12px;font-weight:600;color:#c8d0e7;}
+.user-info .urole{font-size:10px;color:#3d4a6b;}
+.logout-btn{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;background:none;border:none;border-radius:7px;color:#5a6a8a;font-size:12px;font-family:'Inter',sans-serif;cursor:pointer;margin-top:4px;transition:all .15s;}
+.logout-btn:hover{background:#1a0a0a;color:#f87171;}
+
+/* ── MAIN ── */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;background:#07090f;}
+.topbar{background:#0d111c;padding:0 28px;height:56px;border-bottom:1px solid #1a2035;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.topbar-left{display:flex;flex-direction:column;}
+.topbar-left .page-title{font-size:15px;font-weight:600;color:#e2e8f0;}
+.topbar-left .page-sub{font-size:11px;color:#3d4a6b;margin-top:1px;}
+.topbar-right{display:flex;align-items:center;gap:10px;}
+.live-pill{display:flex;align-items:center;gap:6px;background:#0a1a12;border:1px solid #14532d;color:#4ade80;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:600;letter-spacing:.3px;}
+.live-dot{width:6px;height:6px;background:#4ade80;border-radius:50%;animation:blink 1.4s infinite;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
+.icon-btn{width:34px;height:34px;background:#0d111c;border:1px solid #1a2035;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;position:relative;color:#5a6a8a;transition:border-color .15s;}
+.icon-btn:hover{border-color:#2a3558;}
+.notif-dot{position:absolute;top:7px;right:7px;width:6px;height:6px;background:#f43f5e;border-radius:50%;}
+
+/* ── CONTENT ── */
+.content{flex:1;overflow-y:auto;padding:24px 28px;}
+.screen{display:none;}
+.screen.active{display:block;}
+
+/* ── KPI CARDS ── */
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px;}
+.kpi-row.two{grid-template-columns:repeat(2,1fr);}
+.kpi{background:#0d111c;border:1px solid #1a2035;border-radius:10px;padding:18px 20px;position:relative;overflow:hidden;}
+.kpi::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(99,102,241,.04) 0%,transparent 60%);}
+.kpi .k-label{font-size:11px;color:#3d4a6b;text-transform:uppercase;letter-spacing:.6px;font-weight:500;}
+.kpi .k-value{font-size:26px;font-weight:700;color:#f1f5f9;margin:8px 0 4px;letter-spacing:-.5px;}
+.kpi .k-delta{font-size:11px;font-weight:500;}
+.kpi .k-delta.up{color:#34d399;}
+.kpi .k-delta.neu{color:#6366f1;}
+.kpi-icon{position:absolute;right:18px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:9px;display:flex;align-items:center;justify-content:center;}
+
+/* ── CHART CARDS ── */
+.row{display:grid;gap:14px;margin-bottom:20px;}
+.row.c21{grid-template-columns:2fr 1fr;}
+.row.c11{grid-template-columns:1fr 1fr;}
+.row.c1{grid-template-columns:1fr;}
+.card{background:#0d111c;border:1px solid #1a2035;border-radius:10px;padding:20px;}
+.card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.card-head .c-title{font-size:12px;font-weight:600;color:#5a6a8a;text-transform:uppercase;letter-spacing:.6px;}
+.card-head .c-badge{font-size:10px;padding:3px 8px;border-radius:4px;font-weight:600;}
+.c-badge.indigo{background:#13183a;color:#818cf8;}
+.c-badge.green{background:#0a1a12;color:#34d399;}
+.c-badge.red{background:#1a080a;color:#f87171;}
+
+/* ── FILTER BAR ── */
+.filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:20px;flex-wrap:wrap;}
+.filter-sep{width:1px;height:24px;background:#1a2035;margin:0 4px;}
+.seg-group{display:flex;background:#0d111c;border:1px solid #1a2035;border-radius:8px;overflow:hidden;}
+.seg-btn{padding:7px 14px;border:none;background:none;color:#5a6a8a;font-size:12px;font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;font-weight:500;}
+.seg-btn.active{background:#13183a;color:#818cf8;}
+.filter-select{background:#0d111c;border:1px solid #1a2035;color:#c8d0e7;padding:7px 12px;border-radius:8px;font-size:12px;font-family:'Inter',sans-serif;cursor:pointer;}
+
+/* ── TABLE ── */
+.data-table{width:100%;border-collapse:collapse;}
+.data-table th{font-size:10px;text-transform:uppercase;letter-spacing:.6px;color:#3d4a6b;padding:0 0 10px;text-align:left;border-bottom:1px solid #1a2035;font-weight:600;}
+.data-table td{padding:11px 0;font-size:13px;border-bottom:1px solid #0d111c;color:#94a3b8;}
+.data-table tbody tr:hover td{background:#080b14;color:#c8d0e7;}
+.rank-num{font-size:11px;font-weight:700;width:28px;color:#3d4a6b;}
+.rank-num.top{color:#6366f1;}
+.rank-num.bot{color:#f43f5e;}
+.item-name-cell{color:#e2e8f0;font-weight:500;}
+.revenue-cell{color:#818cf8;font-weight:600;}
+
+/* ── FEEDBACK ── */
+.fb-list{display:flex;flex-direction:column;gap:10px;}
+.fb-card{background:#0d111c;border:1px solid #1a2035;border-radius:10px;padding:16px 18px;display:flex;gap:14px;align-items:flex-start;transition:border-color .15s;}
+.fb-card:hover{border-color:#2a3558;}
+.fb-av{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex-shrink:0;}
+.fb-body{flex:1;}
+.fb-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3px;}
+.fb-name{font-size:13px;font-weight:600;color:#e2e8f0;}
+.fb-time{font-size:11px;color:#3d4a6b;}
+.fb-item-tag{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:#5a6a8a;margin-bottom:6px;}
+.fb-item-tag .dot{width:4px;height:4px;border-radius:50%;background:#6366f1;}
+.fb-text{font-size:13px;color:#64748b;line-height:1.55;}
+.stars-row{display:flex;gap:2px;}
+.star{width:12px;height:12px;color:#f59e0b;}
+.star.e{color:#1a2035;}
+
+/* ── AGENT CARDS ── */
+.agent-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:20px;}
+.ag-card{background:#0d111c;border:1px solid #1a2035;border-radius:10px;padding:20px;}
+.ag-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;}
+.ag-left{display:flex;align-items:center;gap:12px;}
+.ag-ico{width:40px;height:40px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:18px;}
+.ag-name{font-size:14px;font-weight:600;color:#e2e8f0;}
+.ag-desc{font-size:11px;color:#3d4a6b;margin-top:2px;}
+.ag-trend{font-size:11px;font-weight:600;color:#34d399;background:#0a1a12;border:1px solid #14532d;padding:3px 8px;border-radius:5px;}
+.ag-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.ag-stat{background:#07090f;border-radius:8px;padding:12px;}
+.ag-stat .s-l{font-size:10px;color:#3d4a6b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;}
+.ag-stat .s-v{font-size:16px;font-weight:700;color:#e2e8f0;}
+.ag-stat .s-s{font-size:10px;color:#5a6a8a;margin-top:2px;}
+
+/* ── AI ── */
+.ai-prompt-card{background:#0d111c;border:1px solid #1a2035;border-radius:10px;padding:20px 24px;margin-bottom:20px;display:flex;align-items:center;justify-content:space-between;}
+.ai-prompt-left h2{font-size:15px;font-weight:600;color:#e2e8f0;}
+.ai-prompt-left p{font-size:12px;color:#3d4a6b;margin-top:4px;}
+.gen-btn{display:flex;align-items:center;gap:8px;background:#13183a;border:1px solid #2a3558;color:#818cf8;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;font-family:'Inter',sans-serif;cursor:pointer;transition:all .15s;}
+.gen-btn:hover{background:#1a2050;border-color:#4f52a8;}
+.ai-list{display:flex;flex-direction:column;gap:10px;}
+.ai-card{background:#0d111c;border:1px solid #1a2035;border-radius:10px;padding:16px 20px;display:flex;gap:14px;align-items:flex-start;border-left:3px solid #6366f1;}
+.ai-idx{min-width:22px;height:22px;background:#13183a;border-radius:5px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#818cf8;}
+.ai-txt{font-size:13px;color:#94a3b8;line-height:1.65;}
+.ai-txt strong{color:#c8d0e7;font-weight:600;}
+.ai-footer{text-align:right;font-size:11px;color:#2a3558;margin-top:16px;}
+.ai-spin{display:none;padding:40px;text-align:center;color:#3d4a6b;}
+.spinner{width:28px;height:28px;border:2px solid #1a2035;border-top-color:#6366f1;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 10px;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar{width:5px;}
+::-webkit-scrollbar-track{background:#07090f;}
+::-webkit-scrollbar-thumb{background:#1a2035;border-radius:3px;}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="logo-wrap">
+    <div class="logo">Kha<span>dim</span></div>
+    <div class="role">Analytics Console</div>
+  </div>
+  <nav class="nav">
+    <div class="nav-label">Main</div>
+    <div class="nav-item active" onclick="go('overview',this,'Overview','Restaurant at a glance')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Overview
+    </div>
+    <div class="nav-item" onclick="go('revenue',this,'Revenue','Sales &amp; profit breakdown')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>
+      Revenue
+    </div>
+    <div class="nav-item" onclick="go('trends',this,'Trends','Top items &amp; peak hours')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Trends
+    </div>
+    <div class="nav-label">Insights</div>
+    <div class="nav-item" onclick="go('feedback',this,'Feedback','Customer reviews')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      Feedback
+    </div>
+    <div class="nav-item" onclick="go('agents',this,'Agent Performance','Revenue by AI agent')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M6 20v-2a6 6 0 0 1 12 0v2"/></svg>
+      Agent Performance
+    </div>
+    <div class="nav-item" onclick="go('ai',this,'AI Suggestions','Gemini-powered insights')">
+      <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      AI Suggestions
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="user-row">
+      <div class="user-avatar">A</div>
+      <div class="user-info">
+        <div class="uname">Ahmed Naveed</div>
+        <div class="urole">Administrator</div>
+      </div>
+    </div>
+    <button class="logout-btn">
+      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+      Sign out
+    </button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="topbar">
+    <div class="topbar-left">
+      <div class="page-title" id="pg-title">Overview</div>
+      <div class="page-sub" id="pg-sub">Restaurant at a glance</div>
+    </div>
+    <div class="topbar-right">
+      <div class="live-pill"><span class="live-dot"></span>Live</div>
+      <div class="icon-btn">
+        <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="notif-dot"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="content">
+
+    <!-- OVERVIEW -->
+    <div class="screen active" id="screen-overview">
+      <div class="kpi-row">
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#0f1628;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 01-8 0"/></svg></div>
+          <div class="k-label">Today's Orders</div>
+          <div class="k-value">134</div>
+          <div class="k-delta up">↑ 12% vs yesterday</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#0f1a10;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#34d399" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+          <div class="k-label">Today's Revenue</div>
+          <div class="k-value">₨ 48,320</div>
+          <div class="k-delta up">↑ 8% vs yesterday</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#140f0f;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#f87171" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+          <div class="k-label">Avg Order Value</div>
+          <div class="k-value">₨ 361</div>
+          <div class="k-delta up">↑ 3% vs yesterday</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#0f1628;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#818cf8" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+          <div class="k-label">Active Orders (Live)</div>
+          <div class="k-value">7</div>
+          <div class="k-delta neu">In kitchen now</div>
+        </div>
+      </div>
+      <div class="row c21">
+        <div class="card">
+          <div class="card-head"><span class="c-title">Revenue — Last 7 Days</span><span class="c-badge indigo">Weekly</span></div>
+          <canvas id="overviewChart" height="110"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="c-title">Orders by Category</span></div>
+          <canvas id="catChart" height="110"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- REVENUE -->
+    <div class="screen" id="screen-revenue">
+      <div class="filter-bar">
+        <div class="seg-group">
+          <button class="seg-btn" onclick="seg(this)">7D</button>
+          <button class="seg-btn active" onclick="seg(this)">30D</button>
+          <button class="seg-btn" onclick="seg(this)">90D</button>
+        </div>
+        <div class="filter-sep"></div>
+        <select class="filter-select">
+          <option>All Categories</option>
+          <option>Burgers</option>
+          <option>Drinks</option>
+          <option>Desserts</option>
+          <option>Sides</option>
+        </select>
+      </div>
+      <div class="kpi-row">
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#0f1628;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#6366f1" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z"/></svg></div>
+          <div class="k-label">Total Orders</div>
+          <div class="k-value">3,842</div>
+          <div class="k-delta up">↑ 14% vs prior</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#0f1a10;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#34d399" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+          <div class="k-label">Total Revenue</div>
+          <div class="k-value">₨ 1.38M</div>
+          <div class="k-delta up">↑ 9% vs prior</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#0a1810;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#4ade80" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg></div>
+          <div class="k-label">Total Profit</div>
+          <div class="k-value">₨ 512K</div>
+          <div class="k-delta up">Margin 37%</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-icon" style="background:#0f1628;"><svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#818cf8" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg></div>
+          <div class="k-label">Avg Order Value</div>
+          <div class="k-value">₨ 359</div>
+          <div class="k-delta up">↑ 2% vs prior</div>
+        </div>
+      </div>
+      <div class="row c1">
+        <div class="card">
+          <div class="card-head"><span class="c-title">Daily Revenue — Last 30 Days</span><span class="c-badge indigo">Bar Chart</span></div>
+          <canvas id="revChart" height="85"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRENDS -->
+    <div class="screen" id="screen-trends">
+      <div class="filter-bar">
+        <div class="seg-group">
+          <button class="seg-btn" onclick="seg(this)">7D</button>
+          <button class="seg-btn active" onclick="seg(this)">30D</button>
+          <button class="seg-btn" onclick="seg(this)">90D</button>
+        </div>
+      </div>
+      <div class="row c11">
+        <div class="card">
+          <div class="card-head"><span class="c-title">Top Selling Items</span><span class="c-badge green">Top 5</span></div>
+          <table class="data-table">
+            <thead><tr><th>#</th><th>Item</th><th>Units</th><th>Revenue</th></tr></thead>
+            <tbody>
+              <tr><td class="rank-num top">01</td><td class="item-name-cell">Zinger Burger</td><td>842</td><td class="revenue-cell">₨ 252,600</td></tr>
+              <tr><td class="rank-num top">02</td><td class="item-name-cell">Crispy Fries</td><td>710</td><td class="revenue-cell">₨ 106,500</td></tr>
+              <tr><td class="rank-num top">03</td><td class="item-name-cell">Pepsi 500ml</td><td>698</td><td class="revenue-cell">₨ 69,800</td></tr>
+              <tr><td class="rank-num top">04</td><td class="item-name-cell">BBQ Burger</td><td>521</td><td class="revenue-cell">₨ 182,350</td></tr>
+              <tr><td class="rank-num top">05</td><td class="item-name-cell">Chicken Tikka</td><td>480</td><td class="revenue-cell">₨ 192,000</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="c-title">Low Selling Items</span><span class="c-badge red">Bottom 5</span></div>
+          <table class="data-table">
+            <thead><tr><th>#</th><th>Item</th><th>Units</th><th>Revenue</th></tr></thead>
+            <tbody>
+              <tr><td class="rank-num bot">01</td><td class="item-name-cell">Garden Salad</td><td>12</td><td class="revenue-cell" style="color:#f87171;">₨ 2,160</td></tr>
+              <tr><td class="rank-num bot">02</td><td class="item-name-cell">Fruit Platter</td><td>18</td><td class="revenue-cell" style="color:#f87171;">₨ 5,400</td></tr>
+              <tr><td class="rank-num bot">03</td><td class="item-name-cell">Lemon Soda</td><td>24</td><td class="revenue-cell" style="color:#f87171;">₨ 2,880</td></tr>
+              <tr><td class="rank-num bot">04</td><td class="item-name-cell">Veggie Wrap</td><td>29</td><td class="revenue-cell" style="color:#f87171;">₨ 8,120</td></tr>
+              <tr><td class="rank-num bot">05</td><td class="item-name-cell">Mushroom Soup</td><td>33</td><td class="revenue-cell" style="color:#f87171;">₨ 9,900</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="row c1">
+        <div class="card">
+          <div class="card-head"><span class="c-title">Order Volume by Hour of Day</span><span class="c-badge indigo">Avg over 30 days</span></div>
+          <canvas id="hourChart" height="75"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- FEEDBACK -->
+    <div class="screen" id="screen-feedback">
+      <div class="filter-bar">
+        <div class="seg-group">
+          <button class="seg-btn" onclick="seg(this)">Today</button>
+          <button class="seg-btn active" onclick="seg(this)">7 Days</button>
+          <button class="seg-btn" onclick="seg(this)">30 Days</button>
+        </div>
+      </div>
+      <div class="fb-list">
+        <div class="fb-card">
+          <div class="fb-av" style="background:#13183a;color:#818cf8;">AK</div>
+          <div class="fb-body">
+            <div class="fb-top">
+              <div>
+                <div class="fb-name">Ahmed K.</div>
+                <div class="fb-item-tag"><span class="dot"></span>Zinger Burger</div>
+              </div>
+              <div style="text-align:right;">
+                <div class="stars-row" style="justify-content:flex-end;margin-bottom:3px;">
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
+                <div class="fb-time">2 hours ago</div>
+              </div>
+            </div>
+            <div class="fb-text">Absolutely loved it. Crispy, juicy and the sauce was perfect. Will definitely order again.</div>
+          </div>
+        </div>
+        <div class="fb-card">
+          <div class="fb-av" style="background:#0a1810;color:#34d399;">SM</div>
+          <div class="fb-body">
+            <div class="fb-top">
+              <div><div class="fb-name">Sara M.</div><div class="fb-item-tag"><span class="dot"></span>Crispy Fries</div></div>
+              <div style="text-align:right;">
+                <div class="stars-row" style="justify-content:flex-end;margin-bottom:3px;">
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star e" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
+                <div class="fb-time">5 hours ago</div>
+              </div>
+            </div>
+            <div class="fb-text">Fries were good but a bit too salty this time. Otherwise solid as always.</div>
+          </div>
+        </div>
+        <div class="fb-card">
+          <div class="fb-av" style="background:#1a080a;color:#f87171;">UR</div>
+          <div class="fb-body">
+            <div class="fb-top">
+              <div><div class="fb-name">Usman R.</div><div class="fb-item-tag"><span class="dot" style="background:#f43f5e;"></span>Garden Salad</div></div>
+              <div style="text-align:right;">
+                <div class="stars-row" style="justify-content:flex-end;margin-bottom:3px;">
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star e" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star e" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star e" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
+                <div class="fb-time">Yesterday</div>
+              </div>
+            </div>
+            <div class="fb-text">Expected more freshness. The dressing was bland and portion too small for the price.</div>
+          </div>
+        </div>
+        <div class="fb-card">
+          <div class="fb-av" style="background:#12100a;color:#fbbf24;">FZ</div>
+          <div class="fb-body">
+            <div class="fb-top">
+              <div><div class="fb-name">Fatima Z.</div><div class="fb-item-tag"><span class="dot"></span>BBQ Burger</div></div>
+              <div style="text-align:right;">
+                <div class="stars-row" style="justify-content:flex-end;margin-bottom:3px;">
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                  <svg class="star" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                </div>
+                <div class="fb-time">Yesterday</div>
+              </div>
+            </div>
+            <div class="fb-text">Best BBQ burger in a while. Smoky flavour was on point and delivery was quick.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- AGENTS -->
+    <div class="screen" id="screen-agents">
+      <div class="kpi-row two" style="margin-bottom:20px;">
+        <div class="kpi">
+          <div class="k-label">Total Agent-Driven Revenue</div>
+          <div class="k-value">₨ 894K</div>
+          <div class="k-delta up">↑ 22% vs last month</div>
+        </div>
+        <div class="kpi">
+          <div class="k-label">Agent-Sourced Orders</div>
+          <div class="k-value">2,341</div>
+          <div class="k-delta up">61% of all orders</div>
+        </div>
+      </div>
+      <div class="agent-grid">
+        <div class="ag-card">
+          <div class="ag-top">
+            <div class="ag-left">
+              <div class="ag-ico" style="background:#0f1628;">🎯</div>
+              <div><div class="ag-name">Recommender Agent</div><div class="ag-desc">Cart-based suggestions</div></div>
+            </div>
+            <div class="ag-trend">↑ 21%</div>
+          </div>
+          <div class="ag-stats">
+            <div class="ag-stat"><div class="s-l">Orders</div><div class="s-v">891</div><div class="s-s">this month</div></div>
+            <div class="ag-stat"><div class="s-l">Revenue</div><div class="s-v">₨ 312K</div><div class="s-s">generated</div></div>
+            <div class="ag-stat"><div class="s-l">CTR</div><div class="s-v">38%</div><div class="s-s">click-through</div></div>
+          </div>
+        </div>
+        <div class="ag-card">
+          <div class="ag-top">
+            <div class="ag-left">
+              <div class="ag-ico" style="background:#0a1810;">🧠</div>
+              <div><div class="ag-name">Personalization Agent</div><div class="ag-desc">History-based recs</div></div>
+            </div>
+            <div class="ag-trend">↑ 28%</div>
+          </div>
+          <div class="ag-stats">
+            <div class="ag-stat"><div class="s-l">Orders</div><div class="s-v">724</div><div class="s-s">this month</div></div>
+            <div class="ag-stat"><div class="s-l">Revenue</div><div class="s-v">₨ 268K</div><div class="s-s">generated</div></div>
+            <div class="ag-stat"><div class="s-l">CTR</div><div class="s-v">44%</div><div class="s-s">click-through</div></div>
+          </div>
+        </div>
+        <div class="ag-card">
+          <div class="ag-top">
+            <div class="ag-left">
+              <div class="ag-ico" style="background:#130a1a;">🎁</div>
+              <div><div class="ag-name">Custom Deal Agent</div><div class="ag-desc">Personalised deals</div></div>
+            </div>
+            <div class="ag-trend">↑ 12%</div>
+          </div>
+          <div class="ag-stats">
+            <div class="ag-stat"><div class="s-l">Orders</div><div class="s-v">512</div><div class="s-s">this month</div></div>
+            <div class="ag-stat"><div class="s-l">Revenue</div><div class="s-v">₨ 198K</div><div class="s-s">generated</div></div>
+            <div class="ag-stat"><div class="s-l">Accept Rate</div><div class="s-v">67%</div><div class="s-s">deals taken</div></div>
+          </div>
+        </div>
+        <div class="ag-card">
+          <div class="ag-top">
+            <div class="ag-left">
+              <div class="ag-ico" style="background:#12100a;">🔔</div>
+              <div><div class="ag-name">Re-engagement Agent</div><div class="ag-desc">Inactive user recovery</div></div>
+            </div>
+            <div class="ag-trend">↑ 44%</div>
+          </div>
+          <div class="ag-stats">
+            <div class="ag-stat"><div class="s-l">Orders</div><div class="s-v">214</div><div class="s-s">this month</div></div>
+            <div class="ag-stat"><div class="s-l">Revenue</div><div class="s-v">₨ 116K</div><div class="s-s">generated</div></div>
+            <div class="ag-stat"><div class="s-l">Recovery</div><div class="s-v">24%</div><div class="s-s">rate</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="row c1">
+        <div class="card">
+          <div class="card-head"><span class="c-title">Agent Revenue — Last 4 Weeks</span></div>
+          <canvas id="agChart" height="75"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI SUGGESTIONS -->
+    <div class="screen" id="screen-ai">
+      <div class="ai-prompt-card">
+        <div class="ai-prompt-left">
+          <h2>AI Business Insights</h2>
+          <p>Gemini 2.0 Flash analyses sales, trends, feedback and agent data to generate actionable suggestions</p>
+        </div>
+        <button class="gen-btn" onclick="genAI()">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+          Generate Insights
+        </button>
+      </div>
+      <div class="ai-spin" id="ai-spin"><div class="spinner"></div>Analysing restaurant data...</div>
+      <div class="ai-list" id="ai-list">
+        <div class="ai-card"><div class="ai-idx">01</div><div class="ai-txt"><strong>Garden Salad and Fruit Platter are underperforming</strong> — with only 12 and 18 units sold this month and sub-3 star ratings, consider removing them or replacing with a Loaded Fries variant which matches current demand patterns.</div></div>
+        <div class="ai-card"><div class="ai-idx">02</div><div class="ai-txt"><strong>Peak hours are 1–3 PM and 8–10 PM</strong> — orders drop 68% between 4–7 PM. Ensure full kitchen staffing during peak windows and use the quiet period for prep and restocking.</div></div>
+        <div class="ai-card"><div class="ai-idx">03</div><div class="ai-txt"><strong>Personalization Agent has the highest click-through rate at 44%</strong> — consider increasing recommendations shown from 5 to 7 items per session to capitalise on this engagement without overwhelming users.</div></div>
+        <div class="ai-card"><div class="ai-idx">04</div><div class="ai-txt"><strong>Zinger Burger drives 22% of total revenue</strong> — bundling it with Crispy Fries and a Pepsi at a 5% discount as a "Zinger Combo" deal could increase average order value while maintaining margin.</div></div>
+        <div class="ai-card"><div class="ai-idx">05</div><div class="ai-txt"><strong>Re-engagement Agent shows 44% revenue growth</strong>, the highest across all agents. Reducing the inactivity trigger from 10 days to 7 days could recover an estimated 15–20% more users per month.</div></div>
+        <div class="ai-footer">Generated today at 2:45 PM &nbsp;·&nbsp; Gemini 2.0 Flash</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const Chart_defaults = Chart.defaults;
+Chart_defaults.color = '#3d4a6b';
+Chart_defaults.borderColor = '#1a2035';
+
+const subMap = {overview:'Restaurant at a glance',revenue:'Sales & profit breakdown',trends:'Top items & peak hours',feedback:'Customer reviews',agents:'Revenue by AI agent',ai:'Gemini-powered insights'};
+
+function go(id,el,title,sub){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('screen-'+id).classList.add('active');
+  el.classList.add('active');
+  document.getElementById('pg-title').textContent = title;
+  document.getElementById('pg-sub').textContent = sub;
+  if(id==='revenue'&&!window._rev) makeRevChart();
+  if(id==='trends'&&!window._tr) makeTrendCharts();
+  if(id==='agents'&&!window._ag) makeAgChart();
+}
+
+function seg(btn){
+  btn.closest('.seg-group').querySelectorAll('.seg-btn').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+const gridColor='#1a2035';
+const tick={color:'#3d4a6b',font:{size:11,family:'Inter'}};
+
+// OVERVIEW
+new Chart(document.getElementById('overviewChart'),{
+  type:'line',
+  data:{labels:['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],
+  datasets:[{data:[38000,42000,35000,51000,47000,55000,48320],borderColor:'#6366f1',backgroundColor:'rgba(99,102,241,0.06)',fill:true,tension:0.4,pointRadius:3,pointBackgroundColor:'#6366f1',borderWidth:2}]},
+  options:{responsive:true,plugins:{legend:{display:false},tooltip:{backgroundColor:'#0d111c',borderColor:'#1a2035',borderWidth:1,titleColor:'#e2e8f0',bodyColor:'#94a3b8',callbacks:{label:v=>'₨'+v.formattedValue}}},scales:{y:{ticks:{...tick,callback:v=>'₨'+(v/1000).toFixed(0)+'k'},grid:{color:gridColor}},x:{ticks:tick,grid:{display:false}}}}
+});
+
+new Chart(document.getElementById('catChart'),{
+  type:'doughnut',
+  data:{labels:['Burgers','Drinks','Sides','Desserts','Other'],datasets:[{data:[42,22,18,10,8],backgroundColor:['#6366f1','#34d399','#f59e0b','#f43f5e','#3d4a6b'],borderWidth:0,hoverOffset:4}]},
+  options:{responsive:true,cutout:'68%',plugins:{legend:{position:'bottom',labels:{color:'#5a6a8a',padding:12,font:{size:11,family:'Inter'},boxWidth:10,boxHeight:10}}}}
+});
+
+function makeRevChart(){
+  const labels=[],data=[];
+  for(let i=29;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);labels.push((d.getDate())+'/'+(d.getMonth()+1));data.push(Math.round(28000+Math.random()*38000));}
+  new Chart(document.getElementById('revChart'),{
+    type:'bar',
+    data:{labels,datasets:[{data,backgroundColor:'rgba(99,102,241,0.5)',hoverBackgroundColor:'#6366f1',borderRadius:3,borderSkipped:false}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{backgroundColor:'#0d111c',borderColor:'#1a2035',borderWidth:1,callbacks:{label:v=>'₨'+v.formattedValue}}},scales:{y:{ticks:{...tick,callback:v=>'₨'+(v/1000).toFixed(0)+'k'},grid:{color:gridColor}},x:{ticks:{...tick,maxTicksLimit:10},grid:{display:false}}}}
+  });
+  window._rev=1;
+}
+
+function makeTrendCharts(){
+  const hours=[];for(let i=0;i<24;i++)hours.push(i+':00');
+  const orders=[3,1,1,1,2,4,12,26,44,61,77,87,94,90,74,57,41,54,71,87,81,64,37,17];
+  const colors=orders.map(v=>v>80?'#6366f1':v>50?'rgba(99,102,241,.65)':v>25?'rgba(99,102,241,.35)':'rgba(99,102,241,.15)');
+  new Chart(document.getElementById('hourChart'),{
+    type:'bar',
+    data:{labels:hours,datasets:[{data:orders,backgroundColor:colors,borderRadius:3,borderSkipped:false}]},
+    options:{responsive:true,plugins:{legend:{display:false},tooltip:{backgroundColor:'#0d111c',borderColor:'#1a2035',borderWidth:1,callbacks:{label:v=>v.formattedValue+' avg orders'}}},scales:{y:{ticks:tick,grid:{color:gridColor}},x:{ticks:{...tick,font:{size:9,family:'Inter'}},grid:{display:false}}}}
+  });
+  window._tr=1;
+}
+
+function makeAgChart(){
+  const labels=['Week 1','Week 2','Week 3','Week 4'];
+  new Chart(document.getElementById('agChart'),{
+    type:'line',
+    data:{labels,datasets:[
+      {label:'Recommender',data:[68,72,78,94],borderColor:'#6366f1',tension:.4,fill:false,pointRadius:3,borderWidth:2},
+      {label:'Personalization',data:[54,61,72,81],borderColor:'#34d399',tension:.4,fill:false,pointRadius:3,borderWidth:2},
+      {label:'Custom Deal',data:[42,48,52,56],borderColor:'#f59e0b',tension:.4,fill:false,pointRadius:3,borderWidth:2},
+      {label:'Re-engagement',data:[18,22,28,48],borderColor:'#f43f5e',tension:.4,fill:false,pointRadius:3,borderWidth:2},
+    ]},
+    options:{responsive:true,plugins:{legend:{labels:{color:'#5a6a8a',font:{size:11,family:'Inter'},boxWidth:12,boxHeight:2}},tooltip:{backgroundColor:'#0d111c',borderColor:'#1a2035',borderWidth:1,callbacks:{label:v=>'₨'+v.formattedValue+'K'}}},scales:{y:{ticks:{...tick,callback:v=>'₨'+v+'K'},grid:{color:gridColor}},x:{ticks:tick,grid:{color:gridColor}}}}
+  });
+  window._ag=1;
+}
+
+function genAI(){
+  const list=document.getElementById('ai-list');
+  const spin=document.getElementById('ai-spin');
+  list.style.display='none'; spin.style.display='block';
+  setTimeout(()=>{spin.style.display='none';list.style.display='flex';},2000);
+}
+</script>
+</body>
+</html>

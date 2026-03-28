@@ -21,6 +21,7 @@ import 'package:khaadim/screens/payments/add_payment_screen.dart';
 import 'package:khaadim/screens/payments/payment_method_screen.dart';
 import 'package:khaadim/screens/orders/order_history_screen.dart';
 import 'package:khaadim/screens/devtools/test_urdu_tts.dart';
+import 'package:khaadim/screens/admin/admin_shell.dart';
 
 void main() {
   runApp(
@@ -62,6 +63,7 @@ class KhaadimApp extends StatelessWidget {
         '/add_payment': (context) => const AddPaymentScreen(),
         '/order_history': (context) => const OrderHistoryScreen(),
         '/ttsTest': (context) => const TestUrduTTSPage(),
+        '/admin': (context) => const AdminShell(),
       },
 
       onUnknownRoute: (settings) {

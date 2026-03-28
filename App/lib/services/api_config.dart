@@ -1,5 +1,11 @@
-class ApiConfig {
-  // Change this ONLY when your WiFi / IP changes
-  static String baseUrl = "http://192.168.100.30:8000";
+import 'package:flutter/foundation.dart';
 
+class ApiConfig {
+  static String get baseUrl {
+    if (kIsWeb) {
+      return 'http://localhost:8000';      // Chrome on same PC
+    } else {
+      return 'http://192.168.100.30:8000'; // Physical mobile device
+    }
+  }
 }

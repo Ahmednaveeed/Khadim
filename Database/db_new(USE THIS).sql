@@ -2695,3 +2695,17 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_updated
     ON public.user_profiles(last_updated);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_cache_ts
     ON public.user_profiles(cached_recommendations_ts);
+
+
+-----------------------------------------------------
+------------------ admin profile --------------------
+-----------------------------------------------------
+
+INSERT INTO auth.app_users (full_name, email, password_hash, is_active)
+VALUES (
+    'Admin',
+    'admin@gmail.com',
+    '$argon2id$v=19$m=65536,t=3,p=4$7h0jRIjxHgPgHEPIOWcsRQ$IQmy+119dEKCCGNX7WZFoKgDjvkE7y9ir3cQ6xTbtxA',
+    TRUE
+)
+ON CONFLICT (email) DO UPDATE

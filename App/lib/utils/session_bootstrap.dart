@@ -17,7 +17,14 @@ class SessionBootstrap {
       }
 
       final me = await AuthService.me();
-      final userId = (me['user_id'] ?? me['userId']).toString();
+      final user = me['user'] ?? me; // sometimes backend wraps it in 'user'
+      final userId = (user['user_id'] ?? user['userId']).toString();
+      final email = (user['email'] ?? '').toString();
+
+      if (email == 'admin@gmail.com') {
+        _goAdmin(context);
+        return;
+      }
 
       await context.read<CartProvider>().initCart(userId);
 
@@ -43,5 +50,10 @@ class SessionBootstrap {
   static void _goMain(BuildContext context) {
     if (!context.mounted) return;
     Navigator.pushReplacementNamed(context, '/main');
+  }
+
+  static void _goAdmin(BuildContext context) {
+    if (!context.mounted) return;
+    Navigator.pushReplacementNamed(context, '/admin');
   }
 }
