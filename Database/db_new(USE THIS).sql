@@ -2709,3 +2709,44 @@ VALUES (
     TRUE
 )
 ON CONFLICT (email) DO UPDATE
+
+
+-- ============================================
+-- DINE-IN FEATURE TABLES 
+-- Added: March 31, 2026
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS public.restaurant_tables (
+    table_id    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    table_number VARCHAR(10) NOT NULL,
+    table_pin   VARCHAR(6) NOT NULL,
+    qr_token    VARCHAR(64) UNIQUE,
+    status      VARCHAR(30) DEFAULT 'available',
+    created_at  TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_tables_status ON public.restaurant_tables(status);
+
+
+CREATE TABLE IF NOT EXISTS public.dine_in_sessions (
+    session_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    table_id       UUID NOT NULL REFERENCES public.restaurant_tables(table_id) ON DELETE CASCADE,
+    started_at     TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    ended_at       TIMESTAMP WITHOUT TIME ZONE,
+    status         VARCHAR(30) DEFAULT 'active',
+    payment_method VARCHAR(20),
+    total_amount   NUMERIC(10,2) DEFAULT 0,
+    round_count    INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_sessions_table  ON public.dine_in_sessions(table_id);
+CREATE INDEX IF NOT EXISTS idx_sessions_status ON public.dine_in_sessions(status);
+
+
+
+ALTER TABLE public.orders
+    ADD COLUMN IF NOT EXISTS order_type      VARCHAR(20) DEFAULT 'delivery',
+    ADD COLUMN IF NOT EXISTS table_id        UUID REFERENCES public.restaurant_tables(table_id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS session_id      UUID REFERENCES public.dine_in_sessions(session_id) ON DELETE SET NULL,
+    ADD COLUMN IF NOT EXISTS round_number    INTEGER,
+    ADD COLUMN IF NOT EXISTS payment_status  VARCHAR(20) DEFAULT NULL;

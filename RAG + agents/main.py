@@ -32,6 +32,8 @@ from feedback.feedback_routes import router as feedback_router
 from custom_deal.custom_deal_routes import router as custom_deal_router
 from favourites.favourites_routes import router as favourites_router
 from admin.admin_routes import router as admin_router
+from dine_in.dine_in_routes import router as dine_in_router
+from admin.table_routes import router as admin_tables_router
 from agents.upsell_agent import UpsellAgent
 from personalization.personalization_agent import PersonalizationAgent
 from agents.recommender_agent import RecommendationEngine
@@ -64,6 +66,8 @@ app.include_router(feedback_router)
 app.include_router(custom_deal_router)
 app.include_router(favourites_router)
 app.include_router(admin_router)
+app.include_router(dine_in_router)
+app.include_router(admin_tables_router)
 
 
 # ── Phase 3: LLM-powered Personalization endpoint ─────────────────

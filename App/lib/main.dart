@@ -5,6 +5,7 @@ import 'themes/app_theme.dart';
 
 // Providers
 import 'providers/cart_provider.dart';
+import 'providers/dine_in_provider.dart';
 
 // Screens
 // Screens
@@ -28,6 +29,7 @@ void main() {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => CartProvider()),
+        ChangeNotifierProvider(create: (_) => DineInProvider()),
       ],
       child: const KhaadimApp(),
     ),

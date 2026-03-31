@@ -104,14 +104,24 @@ class ImageResolver {
 
   // Legacy category-based deal banners (kept for any other callers)
   static const Map<String, String> dealImages = {
-    "bbq":       "assets/images/deals/deal_bbq.jpeg",
-    "chinese":   "assets/images/deals/deal_chinese.jpeg",
-    "desi":      "assets/images/deals/deal_desi.jpeg",
-    "drinks":    "assets/images/deals/deal_drinks.jpeg",
-    "fast_food": "assets/images/deals/deal_fastfood.jpeg",
+    "bbq":       "assets/images/deals/BBQ deals/bbq_solo.png",
+    "chinese":   "assets/images/deals/Chinese Deals/chinese_solo.png",
+    "desi":      "assets/images/deals/Desi deals/desi_solo.png",
+    "drinks":    "assets/images/confirm.png",
+    "fast_food": "assets/images/deals/FastFood deals/Fast_solo_A.png",
   };
 
   static const String fallbackImage = "assets/images/confirm.png";
+
+  static String? _findCaseInsensitive(Map<String, String> map, String key) {
+    final lookup = key.trim().toLowerCase();
+    for (final entry in map.entries) {
+      if (entry.key.toLowerCase() == lookup) {
+        return entry.value;
+      }
+    }
+    return null;
+  }
 
   static String normalizeItemName(String itemName) {
     return itemName
@@ -123,17 +133,32 @@ class ImageResolver {
 
   // 1. Exact DB name match → 2. Normalised folder guess → 3. Fallback
   static String getMenuImage(String category, String itemName) {
-    final exact = exactMenuImages[itemName.trim()];
+    final exact = exactMenuImages[itemName.trim()] ??
+        _findCaseInsensitive(exactMenuImages, itemName);
     if (exact != null) return exact;
 
-    final folder = categoryFolders[category.toLowerCase()];
-    if (folder == null) return fallbackImage;
-    return "$folder${normalizeItemName(itemName)}.jpeg";
+    switch (category.toLowerCase()) {
+      case 'bbq':
+        return 'assets/images/menu/bbq/chicken_tikka.jpeg';
+      case 'bread':
+        return 'assets/images/menu/bread/roti.jpeg';
+      case 'chinese':
+        return 'assets/images/menu/chinese/kung pao chicken.png';
+      case 'desi':
+        return 'assets/images/menu/desi/chicken_karahi.jpeg';
+      case 'drinks':
+        return 'assets/images/menu/drinks/cola.jpg';
+      case 'fast_food':
+        return 'assets/images/menu/fast_food/cheeseburger.png';
+      default:
+        return fallbackImage;
+    }
   }
 
   static String getDealImage(String dealName) {
     // 1. Exact match by deal name
-    final exact = exactDealImages[dealName.trim()];
+    final exact = exactDealImages[dealName.trim()] ??
+        _findCaseInsensitive(exactDealImages, dealName);
     if (exact != null) return exact;
     // 2. Legacy category fallback
     return dealImages[getDealCategory(dealName)] ?? fallbackImage;
