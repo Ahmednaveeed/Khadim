@@ -57,21 +57,30 @@ def get_recent_orders(days: int = 7, _: Dict = Depends(_require_admin)):
             query = text("""
                 SELECT 
                     o.order_id,
-                    u.full_name AS customer_name,
+                    o.order_type,
+                    COALESCE(
+                        u.full_name,
+                        CASE
+                            WHEN COALESCE(o.order_type, 'delivery') = 'dine_in' THEN CONCAT('Table ', rt.table_number)
+                            ELSE NULL
+                        END,
+                        'Guest'
+                    ) AS customer_name,
                     o.total_price AS total,
                     o.status,
                     o.created_at,
                     f.rating AS review_rating,
                     f.message AS review_text,
                     (
-                        SELECT string_agg(m.item_name || ' x' || oi.quantity::text, ', ')
+                        SELECT string_agg(oi.name_snapshot || ' x' || oi.quantity::text, ', ')
                         FROM public.order_items oi
-                        JOIN public.menu_item m ON oi.item_id = m.item_id
-                        WHERE oi.order_id = o.order_id AND oi.item_type = 'menu_item'
+                        WHERE oi.order_id = o.order_id
                     ) AS items_str
                 FROM public.orders o
-                JOIN public.cart c ON o.cart_id = c.cart_id
-                JOIN auth.app_users u ON c.user_id = u.user_id
+                LEFT JOIN public.cart c ON o.cart_id = c.cart_id
+                LEFT JOIN auth.app_users u ON c.user_id = u.user_id
+                LEFT JOIN public.dine_in_sessions s ON s.session_id = o.session_id
+                LEFT JOIN public.restaurant_tables rt ON rt.table_id = s.table_id
                 LEFT JOIN public.feedback f ON f.order_id = o.order_id AND f.item_id IS NULL AND f.feedback_type = 'ORDER'
                 WHERE o.created_at >= NOW() - INTERVAL '1 day' * :days
                 ORDER BY o.created_at DESC
@@ -88,6 +97,7 @@ def get_recent_orders(days: int = 7, _: Dict = Depends(_require_admin)):
                 orders.append({
                     "order_id": r["order_id"],
                     "customer_name": r["customer_name"] or "Guest",
+                    "order_type": (r["order_type"] or "delivery"),
                     "items": items_list,
                     "total": float(r["total"] or 0.0),
                     "status": r["status"],

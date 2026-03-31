@@ -6,6 +6,7 @@ import 'package:khaadim/providers/dine_in_provider.dart';
 import 'package:khaadim/screens/chat/chat_bottom_sheet.dart';
 import 'package:khaadim/screens/discover/custom_deal_screen.dart';
 import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
+import 'package:khaadim/screens/dine_in/my_table_screen.dart';
 import 'package:khaadim/services/api_config.dart';
 import 'package:khaadim/utils/ImageResolver.dart';
 import 'package:provider/provider.dart';
@@ -46,20 +47,24 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
 
     try {
       final token = Provider.of<DineInProvider>(context, listen: false).token;
-      final response = await http.get(
-        Uri.parse(
-          '${ApiConfig.baseUrl}/dine-in/top-sellers?ts=${DateTime.now().millisecondsSinceEpoch}',
-        ),
-        headers: {
-          'Content-Type': 'application/json',
-          'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache',
-          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-        },
-      ).timeout(const Duration(seconds: 8));
+      final response = await http
+          .get(
+            Uri.parse(
+              '${ApiConfig.baseUrl}/dine-in/top-sellers?ts=${DateTime.now().millisecondsSinceEpoch}',
+            ),
+            headers: {
+              'Content-Type': 'application/json',
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache',
+              if (token != null && token.isNotEmpty)
+                'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(const Duration(seconds: 8));
 
-      final dynamic decoded =
-          response.body.isNotEmpty ? jsonDecode(response.body) : <String, dynamic>{};
+      final dynamic decoded = response.body.isNotEmpty
+          ? jsonDecode(response.body)
+          : <String, dynamic>{};
 
       if (response.statusCode < 200 || response.statusCode >= 300) {
         String message = 'Failed to load top sellers';
@@ -75,32 +80,45 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
       if (decoded is List) {
         rawItems = decoded;
         rawMenuItems = rawItems
-            .where((e) =>
-                e is Map &&
-                ((e['item_type'] ?? '').toString().toLowerCase() != 'deal'))
+            .where(
+              (e) =>
+                  e is Map &&
+                  ((e['item_type'] ?? '').toString().toLowerCase() != 'deal'),
+            )
             .toList();
         rawDeals = rawItems
-            .where((e) =>
-                e is Map && ((e['item_type'] ?? '').toString().toLowerCase() == 'deal'))
+            .where(
+              (e) =>
+                  e is Map &&
+                  ((e['item_type'] ?? '').toString().toLowerCase() == 'deal'),
+            )
             .toList();
       } else if (decoded is Map<String, dynamic>) {
-        final maybeItems = decoded['top_sellers'] ?? decoded['items'] ?? decoded['data'];
+        final maybeItems =
+            decoded['top_sellers'] ?? decoded['items'] ?? decoded['data'];
         rawItems = maybeItems is List ? maybeItems : <dynamic>[];
         final maybeMenuItems = decoded['top_menu_items'];
         rawMenuItems = maybeMenuItems is List
             ? maybeMenuItems
             : rawItems
-                .where((e) =>
-                    e is Map &&
-                    ((e['item_type'] ?? '').toString().toLowerCase() != 'deal'))
-                .toList();
+                  .where(
+                    (e) =>
+                        e is Map &&
+                        ((e['item_type'] ?? '').toString().toLowerCase() !=
+                            'deal'),
+                  )
+                  .toList();
         final maybeDeals = decoded['top_deals'];
         rawDeals = maybeDeals is List
             ? maybeDeals
             : rawItems
-                .where((e) =>
-                    e is Map && ((e['item_type'] ?? '').toString().toLowerCase() == 'deal'))
-                .toList();
+                  .where(
+                    (e) =>
+                        e is Map &&
+                        ((e['item_type'] ?? '').toString().toLowerCase() ==
+                            'deal'),
+                  )
+                  .toList();
       } else {
         rawItems = <dynamic>[];
         rawMenuItems = <dynamic>[];
@@ -145,13 +163,10 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
         ? rawPrice.toDouble()
         : double.tryParse(rawPrice.toString()) ?? 0.0;
 
-    Provider.of<DineInProvider>(context, listen: false).addItem(
-      itemId,
-      itemType,
-      name,
-      price,
-      1,
-    );
+    Provider.of<DineInProvider>(
+      context,
+      listen: false,
+    ).addItem(itemId, itemType, name, price, 1);
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -162,13 +177,15 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
   }
 
   List<String> _extractDealItems(Map<String, dynamic> item) {
-    final rawItems = item['deal_items'] ?? item['items'] ?? item['deal_item_names'];
+    final rawItems =
+        item['deal_items'] ?? item['items'] ?? item['deal_item_names'];
 
     if (rawItems is List) {
       return rawItems
           .map((entry) {
             if (entry is Map) {
-              final name = entry['item_name'] ?? entry['name'] ?? entry['title'];
+              final name =
+                  entry['item_name'] ?? entry['name'] ?? entry['title'];
               return name?.toString().trim() ?? '';
             }
             return entry.toString().trim();
@@ -209,7 +226,10 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
               child: GestureDetector(
                 onTap: () {},
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 420, maxHeight: 500),
+                  constraints: const BoxConstraints(
+                    maxWidth: 420,
+                    maxHeight: 500,
+                  ),
                   child: Material(
                     color: theme.colorScheme.surface,
                     elevation: 12,
@@ -242,7 +262,9 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
                           Text(
                             'Items in this deal',
                             style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurface.withValues(alpha: 0.7),
+                              color: theme.colorScheme.onSurface.withValues(
+                                alpha: 0.7,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 12),
@@ -252,7 +274,9 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
                                     width: double.infinity,
                                     padding: const EdgeInsets.all(12),
                                     decoration: BoxDecoration(
-                                      color: theme.colorScheme.surfaceContainerHighest,
+                                      color: theme
+                                          .colorScheme
+                                          .surfaceContainerHighest,
                                       borderRadius: BorderRadius.circular(12),
                                     ),
                                     child: Text(
@@ -266,27 +290,35 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
                                         for (final itemName in itemNames)
                                           Container(
                                             width: double.infinity,
-                                            margin: const EdgeInsets.only(bottom: 8),
+                                            margin: const EdgeInsets.only(
+                                              bottom: 8,
+                                            ),
                                             padding: const EdgeInsets.symmetric(
                                               horizontal: 12,
                                               vertical: 10,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: theme.colorScheme.surfaceContainerHighest,
-                                              borderRadius: BorderRadius.circular(10),
+                                              color: theme
+                                                  .colorScheme
+                                                  .surfaceContainerHighest,
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
                                             ),
                                             child: Row(
                                               children: [
                                                 Icon(
                                                   Icons.check_circle_rounded,
                                                   size: 18,
-                                                  color: theme.colorScheme.primary,
+                                                  color:
+                                                      theme.colorScheme.primary,
                                                 ),
                                                 const SizedBox(width: 10),
                                                 Expanded(
                                                   child: Text(
                                                     itemName,
-                                                    style: theme.textTheme.bodyMedium,
+                                                    style: theme
+                                                        .textTheme
+                                                        .bodyMedium,
                                                   ),
                                                 ),
                                               ],
@@ -328,7 +360,10 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
         );
       },
       transitionBuilder: (context, animation, _, child) {
-        final curved = CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
         return FadeTransition(
           opacity: curved,
           child: ScaleTransition(
@@ -347,7 +382,10 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
   }
 
   String _resolveItemType(Map<String, dynamic> item) {
-    final type = (item['item_type'] ?? 'menu_item').toString().trim().toLowerCase();
+    final type = (item['item_type'] ?? 'menu_item')
+        .toString()
+        .trim()
+        .toLowerCase();
     return type == 'deal' ? 'deal' : 'menu_item';
   }
 
@@ -400,9 +438,10 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final tableNumber =
-        Provider.of<DineInProvider>(context).tableNumber?.trim().isNotEmpty == true
-            ? Provider.of<DineInProvider>(context).tableNumber!.trim()
-            : '--';
+        Provider.of<DineInProvider>(context).tableNumber?.trim().isNotEmpty ==
+            true
+        ? Provider.of<DineInProvider>(context).tableNumber!.trim()
+        : '--';
 
     return SafeArea(
       child: Scaffold(
@@ -414,6 +453,15 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
             ),
           ),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.table_restaurant_outlined),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const MyTableScreen()),
+                );
+              },
+            ),
             IconButton(
               icon: const Icon(Icons.shopping_cart_outlined),
               onPressed: () {
@@ -503,7 +551,6 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        
         const SizedBox(height: 12),
         if (!hasItems)
           Padding(
@@ -577,7 +624,8 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
             physics: const NeverScrollableScrollPhysics(),
             itemCount: items.length,
             separatorBuilder: (_, __) => const SizedBox(height: 8),
-            itemBuilder: (_, index) => _buildTopSellerCard(context, items[index]),
+            itemBuilder: (_, index) =>
+                _buildTopSellerCard(context, items[index]),
           ),
         ],
       ),
@@ -595,7 +643,8 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
         : double.tryParse(rawPrice.toString()) ?? 0.0;
     final soldCount = (item['sold_count'] as num?)?.toInt() ?? 0;
     final imagePath = _resolveImagePath(item);
-    final isNetworkImage = imagePath.startsWith('http://') || imagePath.startsWith('https://');
+    final isNetworkImage =
+        imagePath.startsWith('http://') || imagePath.startsWith('https://');
 
     return Material(
       color: Colors.transparent,
@@ -662,7 +711,9 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
                       Text(
                         '$soldCount sold',
                         style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurface.withValues(alpha: 0.55),
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.55,
+                          ),
                         ),
                       ),
                   ],
@@ -672,12 +723,16 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
               ElevatedButton(
                 onPressed: () => _addTopSellerItem(item),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      isDeal ? Colors.orangeAccent : theme.colorScheme.primary,
+                  backgroundColor: isDeal
+                      ? Colors.orangeAccent
+                      : theme.colorScheme.primary,
                   foregroundColor: Colors.white,
                   elevation: 0,
                   minimumSize: const Size(68, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   visualDensity: VisualDensity.compact,
                   shape: RoundedRectangleBorder(

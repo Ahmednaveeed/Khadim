@@ -7,16 +7,26 @@ class DineInSessionStorage {
   static const String _tableIdKey = 'dine_in_table_id';
   static const String _tableNumberKey = 'dine_in_table_number';
   static const String _tokenKey = 'dine_in_token';
+  static const String _startedAtKey = 'dine_in_started_at';
 
   static Future<void> saveSession({
     required String sessionId,
     required String tableId,
     required String tableNumber,
     String? token,
+    DateTime? startedAt,
   }) async {
     await _storage.write(key: _sessionIdKey, value: sessionId);
     await _storage.write(key: _tableIdKey, value: tableId);
     await _storage.write(key: _tableNumberKey, value: tableNumber);
+    if (startedAt != null) {
+      await _storage.write(
+        key: _startedAtKey,
+        value: startedAt.toIso8601String(),
+      );
+    } else {
+      await _storage.delete(key: _startedAtKey);
+    }
     if (token != null && token.isNotEmpty) {
       await _storage.write(key: _tokenKey, value: token);
     } else {
@@ -29,6 +39,7 @@ class DineInSessionStorage {
     final tableId = await _storage.read(key: _tableIdKey);
     final tableNumber = await _storage.read(key: _tableNumberKey);
     final token = await _storage.read(key: _tokenKey);
+    final startedAt = await _storage.read(key: _startedAtKey);
 
     if (sessionId == null || tableId == null || tableNumber == null) {
       return null;
@@ -39,6 +50,7 @@ class DineInSessionStorage {
       'table_id': tableId,
       'table_number': tableNumber,
       'token': token ?? '',
+      'started_at': startedAt ?? '',
     };
   }
 
@@ -47,5 +59,6 @@ class DineInSessionStorage {
     await _storage.delete(key: _tableIdKey);
     await _storage.delete(key: _tableNumberKey);
     await _storage.delete(key: _tokenKey);
+    await _storage.delete(key: _startedAtKey);
   }
 }

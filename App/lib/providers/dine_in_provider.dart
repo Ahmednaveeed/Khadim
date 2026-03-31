@@ -3,11 +3,25 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:khaadim/services/dine_in_session_storage.dart';
 
+class CardDetails {
+  final String cardNumber;
+  final String expiry;
+  final String cvv;
+
+  CardDetails({
+    required this.cardNumber,
+    required this.expiry,
+    required this.cvv,
+  });
+}
+
 class DineInProvider extends ChangeNotifier {
   String? sessionId;
   String? tableNumber;
   String? tableId;
   String? token;
+  DateTime? startedAt;
+  CardDetails? sessionCard;
   List<Map<String, dynamic>> currentOrderItems = [];
   bool isLoading = false;
 
@@ -16,13 +30,18 @@ class DineInProvider extends ChangeNotifier {
     String tableId,
     String tableNumber, {
     String? token,
+    DateTime? startedAt,
   }) {
     this.sessionId = sessionId;
     this.tableId = tableId;
     this.tableNumber = tableNumber;
     this.token = token;
+    this.startedAt = startedAt ?? DateTime.now();
+    sessionCard = null;
     currentOrderItems.clear();
-    unawaited(_persistSession(sessionId, tableId, tableNumber, token));
+    unawaited(
+      _persistSession(sessionId, tableId, tableNumber, token, this.startedAt),
+    );
     notifyListeners();
   }
 
@@ -31,6 +50,7 @@ class DineInProvider extends ChangeNotifier {
     String tableId,
     String tableNumber,
     String? token,
+    DateTime? startedAt,
   ) async {
     try {
       await DineInSessionStorage.saveSession(
@@ -38,6 +58,7 @@ class DineInProvider extends ChangeNotifier {
         tableId: tableId,
         tableNumber: tableNumber,
         token: token,
+        startedAt: startedAt,
       );
     } catch (_) {
       // Ignore persistence errors and keep in-memory session active.
@@ -54,7 +75,14 @@ class DineInProvider extends ChangeNotifier {
     tableId = saved['table_id'];
     tableNumber = saved['table_number'];
     final restoredToken = saved['token'];
-    token = (restoredToken == null || restoredToken.isEmpty) ? null : restoredToken;
+    final restoredStartedAt = saved['started_at'];
+    token = (restoredToken == null || restoredToken.isEmpty)
+        ? null
+        : restoredToken;
+    startedAt = restoredStartedAt == null || restoredStartedAt.isEmpty
+        ? DateTime.now()
+        : DateTime.tryParse(restoredStartedAt) ?? DateTime.now();
+    sessionCard = null;
     currentOrderItems.clear();
     notifyListeners();
     return true;
@@ -103,10 +131,13 @@ class DineInProvider extends ChangeNotifier {
           final normalizedType = rawType == 'deal' ? 'deal' : 'menu_item';
           final rawId = raw['item_id'];
           final rawQuantity = raw['quantity'];
-          final rawPrice = raw['price'] ?? raw['item_price'] ?? raw['unit_price'];
+          final rawPrice =
+              raw['price'] ?? raw['item_price'] ?? raw['unit_price'];
 
           return {
-            'item_id': rawId is int ? rawId : int.tryParse(rawId.toString()) ?? 0,
+            'item_id': rawId is int
+                ? rawId
+                : int.tryParse(rawId.toString()) ?? 0,
             'item_type': normalizedType,
             'item_name': (raw['item_name'] ?? 'Item').toString(),
             'quantity': rawQuantity is int
@@ -149,15 +180,26 @@ class DineInProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void endSession() {
+  void saveSessionCard(CardDetails card) {
+    sessionCard = card;
+    notifyListeners();
+  }
+
+  void clearSession() {
     sessionId = null;
     tableNumber = null;
     tableId = null;
     token = null;
+    startedAt = null;
+    sessionCard = null;
     currentOrderItems.clear();
     isLoading = false;
     unawaited(_clearPersistedSession());
     notifyListeners();
+  }
+
+  void endSession() {
+    clearSession();
   }
 
   Future<void> _clearPersistedSession() async {

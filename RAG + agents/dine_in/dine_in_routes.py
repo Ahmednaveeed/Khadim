@@ -1,5 +1,6 @@
 import asyncio
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
@@ -24,7 +25,7 @@ class DineInOrderItem(BaseModel):
 
 
 class DineInOrderRequest(BaseModel):
-    session_id: str
+    session_id: UUID
     items: list[DineInOrderItem]
 
 
@@ -35,7 +36,7 @@ class DineInRecommendationSeedItem(BaseModel):
 
 
 class DineInRecommendationsRequest(BaseModel):
-    session_id: str
+    session_id: UUID
     items: list[DineInRecommendationSeedItem]
 
 
@@ -346,7 +347,7 @@ def create_dine_in_order(payload: DineInOrderRequest):
         session_row = conn.execute(
             text(
                 """
-                SELECT session_id
+                SELECT session_id, COALESCE(round_count, 0) AS round_count
                 FROM public.dine_in_sessions
                 WHERE session_id = :session_id
                   AND status = 'active'
@@ -358,6 +359,8 @@ def create_dine_in_order(payload: DineInOrderRequest):
 
         if not session_row:
             raise HTTPException(status_code=404, detail="Active dine-in session not found")
+
+        next_round_number = int(session_row["round_count"] or 0) + 1
 
         normalized_items = []
         subtotal = 0.0
@@ -443,7 +446,9 @@ def create_dine_in_order(payload: DineInOrderRequest):
                     order_type,
                     session_id,
                     status,
-                    estimated_prep_time_minutes
+                    estimated_prep_time_minutes,
+                    round_number,
+                    payment_status
                 )
                 VALUES (
                     :cart_id,
@@ -454,7 +459,9 @@ def create_dine_in_order(payload: DineInOrderRequest):
                     'dine_in',
                     :session_id,
                     'confirmed',
-                    15
+                    15,
+                    :round_number,
+                    'to_be_paid'
                 )
                 RETURNING order_id
                 """
@@ -466,6 +473,7 @@ def create_dine_in_order(payload: DineInOrderRequest):
                 "tax": tax,
                 "delivery_fee": delivery_fee,
                 "session_id": payload.session_id,
+                "round_number": next_round_number,
             },
         ).mappings().fetchone()
 
@@ -539,8 +547,122 @@ def create_dine_in_order(payload: DineInOrderRequest):
     return {
         "order_id": order_id,
         "session_id": str(payload.session_id),
+        "round_number": next_round_number,
         "total_price": total,
         "items": normalized_items,
+    }
+
+
+@router.get("/sessions/{session_id}/orders")
+def get_session_orders(session_id: UUID):
+    with SQL_ENGINE.connect() as conn:
+        session_row = conn.execute(
+            text(
+                """
+                SELECT s.session_id, s.status, t.table_number
+                FROM public.dine_in_sessions s
+                JOIN public.restaurant_tables t ON t.table_id = s.table_id
+                WHERE s.session_id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchone()
+
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Dine-in session not found")
+
+        order_rows = conn.execute(
+            text(
+                """
+                SELECT
+                    o.order_id,
+                    o.round_number,
+                    o.created_at,
+                    o.total_price,
+                    o.status,
+                    o.payment_status
+                FROM public.orders o
+                WHERE o.session_id = :session_id
+                  AND COALESCE(o.order_type, 'delivery') = 'dine_in'
+                ORDER BY o.created_at ASC, o.order_id ASC
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchall()
+
+        item_rows = conn.execute(
+            text(
+                """
+                SELECT
+                    oi.order_id,
+                    oi.item_type,
+                    oi.item_id,
+                    oi.name_snapshot,
+                    oi.quantity,
+                    oi.unit_price_snapshot,
+                    oi.line_total
+                FROM public.order_items oi
+                JOIN public.orders o ON o.order_id = oi.order_id
+                WHERE o.session_id = :session_id
+                  AND COALESCE(o.order_type, 'delivery') = 'dine_in'
+                ORDER BY oi.order_id ASC, oi.id ASC
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchall()
+
+    items_by_order: dict[int, list[dict]] = {}
+    for row in item_rows:
+        order_id = int(row["order_id"])
+        items_by_order.setdefault(order_id, []).append(
+            {
+                "item_type": row["item_type"],
+                "item_id": int(row["item_id"]),
+                "item_name": row["name_snapshot"],
+                "quantity": int(row["quantity"] or 0),
+                "price": float(row["unit_price_snapshot"] or 0),
+                "line_total": float(row["line_total"] or 0),
+            }
+        )
+
+    orders = []
+    session_total = 0.0
+
+    for index, row in enumerate(order_rows, start=1):
+        order_total = float(row["total_price"] or 0)
+        session_total = round(session_total + order_total, 2)
+
+        payment_status = (row["payment_status"] or "").strip().lower()
+        status = (row["status"] or "").strip().lower()
+        is_paid = payment_status in {"paid", "settled"} or status in {
+            "paid",
+            "settled",
+            "completed",
+        }
+
+        orders.append(
+            {
+                "order_id": int(row["order_id"]),
+                "round_id": int(row["order_id"]),
+                "round_number": int(row["round_number"] or index),
+                "created_at": row["created_at"].isoformat()
+                if row["created_at"]
+                else None,
+                "status": row["status"],
+                "payment_status": row["payment_status"],
+                "is_paid": is_paid,
+                "round_total": order_total,
+                "items": items_by_order.get(int(row["order_id"]), []),
+            }
+        )
+
+    return {
+        "session_id": str(session_row["session_id"]),
+        "table_number": session_row["table_number"],
+        "session_status": session_row["status"],
+        "session_total": session_total,
+        "orders": orders,
     }
 
 

@@ -5,7 +5,7 @@ import 'package:khaadim/providers/dine_in_provider.dart';
 import 'package:khaadim/screens/cart/cart_screen.dart';
 import 'package:khaadim/screens/deals/deal_screen.dart';
 import 'package:khaadim/screens/dine_in/dine_in_home_screen.dart';
-import 'package:khaadim/screens/dine_in/dine_in_order_history_screen.dart';
+import 'package:khaadim/screens/dine_in/my_table_screen.dart';
 import 'package:khaadim/screens/dine_in/table_pin_screen.dart';
 import 'package:khaadim/screens/menu/menu_screen.dart';
 import 'package:khaadim/screens/orders/order_tracking_screen.dart';
@@ -50,7 +50,7 @@ class KhadimKioskApp extends StatelessWidget {
         '/kiosk-menu': (_) => const MenuScreen(),
         '/kiosk-deals': (_) => const DealScreen(),
         '/kiosk-cart': (_) => const CartScreen(),
-        '/kiosk-orders': (_) => const DineInOrderHistoryScreen(),
+        '/kiosk-table': (_) => const MyTableScreen(),
         '/kiosk-tracking': (_) => const OrderTrackingScreen(orderId: 0),
 
         // Backward-compatible aliases for existing navigation calls.
@@ -59,13 +59,11 @@ class KhadimKioskApp extends StatelessWidget {
         '/kiosk/menu': (_) => const MenuScreen(),
         '/kiosk/deals': (_) => const DealScreen(),
         '/kiosk/cart': (_) => const CartScreen(),
-        '/kiosk/orders': (_) => const DineInOrderHistoryScreen(),
+        '/kiosk/table': (_) => const MyTableScreen(),
         '/kiosk/tracking': (_) => const OrderTrackingScreen(orderId: 0),
       },
       onUnknownRoute: (settings) {
-        return MaterialPageRoute(
-          builder: (_) => const TablePinScreen(),
-        );
+        return MaterialPageRoute(builder: (_) => const TablePinScreen());
       },
     );
   }

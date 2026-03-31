@@ -5,16 +5,16 @@ import 'package:http/http.dart' as http;
 class DineInService {
   static const String _baseUrl = 'http://192.168.100.30:8000';
 
-  Future<Map<String, dynamic>> tableLogin(String tableNumber, String pin) async {
+  Future<Map<String, dynamic>> tableLogin(
+    String tableNumber,
+    String pin,
+  ) async {
     final url = Uri.parse('$_baseUrl/dine-in/table-login');
 
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'table_number': tableNumber,
-        'pin': pin,
-      }),
+      body: jsonEncode({'table_number': tableNumber, 'pin': pin}),
     );
 
     return _handleResponse(response);
@@ -29,10 +29,7 @@ class DineInService {
     final response = await http.post(
       url,
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'session_id': sessionId,
-        'items': items,
-      }),
+      body: jsonEncode({'session_id': sessionId, 'items': items}),
     );
 
     return _handleResponse(response);
@@ -48,10 +45,7 @@ class DineInService {
       final response = await http.post(
         url,
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'session_id': sessionId,
-          'items': items,
-        }),
+        body: jsonEncode({'session_id': sessionId, 'items': items}),
       );
 
       final data = _handleResponse(response);
@@ -65,9 +59,37 @@ class DineInService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> fetchSessionOrders(
+    String sessionId, {
+    String? token,
+  }) async {
+    final url = Uri.parse('$_baseUrl/dine-in/sessions/$sessionId/orders');
+
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+    );
+
+    final decoded = _handleResponse(response);
+    final raw =
+        decoded['orders'] ?? decoded['rounds'] ?? decoded['data'] ?? decoded;
+    if (raw is! List) {
+      return <Map<String, dynamic>>[];
+    }
+
+    return raw
+        .whereType<Map>()
+        .map((entry) => Map<String, dynamic>.from(entry))
+        .toList();
+  }
+
   Map<String, dynamic> _handleResponse(http.Response response) {
-    final dynamic decoded =
-        response.body.isNotEmpty ? jsonDecode(response.body) : {};
+    final dynamic decoded = response.body.isNotEmpty
+        ? jsonDecode(response.body)
+        : {};
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};

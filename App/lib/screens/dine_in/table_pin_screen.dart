@@ -52,9 +52,14 @@ class _TablePinScreenState extends State<TablePinScreen> {
 
       final sessionId = (result['session_id'] ?? '').toString();
       final tableId = (result['table_id'] ?? '').toString();
-      final resolvedTableNumber =
-          (result['table_number'] ?? tableNumber).toString();
-        final token = (result['token'] ?? result['access_token'] ?? '').toString();
+      final resolvedTableNumber = (result['table_number'] ?? tableNumber)
+          .toString();
+      final token = (result['token'] ?? result['access_token'] ?? '')
+          .toString();
+      final startedAtRaw = (result['started_at'] ?? '').toString();
+      final startedAt = startedAtRaw.isEmpty
+          ? null
+          : DateTime.tryParse(startedAtRaw);
 
       if (sessionId.isEmpty) {
         throw Exception('Table login succeeded but session_id is missing.');
@@ -70,14 +75,15 @@ class _TablePinScreenState extends State<TablePinScreen> {
         tableId,
         resolvedTableNumber,
         token: token.isEmpty ? null : token,
+        startedAt: startedAt,
       );
 
       Navigator.pushReplacementNamed(context, '/kiosk-home');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(e.toString())));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -95,10 +101,7 @@ class _TablePinScreenState extends State<TablePinScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [
-              Color(0xFF010917),
-              Color(0xFF021433),
-            ],
+            colors: [Color(0xFF010917), Color(0xFF021433)],
           ),
         ),
         child: SafeArea(
@@ -135,9 +138,10 @@ class _TablePinScreenState extends State<TablePinScreen> {
                               errorBuilder: (context, error, stackTrace) {
                                 return Text(
                                   'Khadim',
-                                  style: theme.textTheme.headlineLarge?.copyWith(
-                                    color: theme.colorScheme.primary,
-                                  ),
+                                  style: theme.textTheme.headlineLarge
+                                      ?.copyWith(
+                                        color: theme.colorScheme.primary,
+                                      ),
                                 );
                               },
                             ),

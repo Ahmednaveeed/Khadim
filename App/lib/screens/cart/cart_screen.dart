@@ -81,10 +81,9 @@ class _CartScreenState extends State<CartScreen> {
   }
 
   String _buildKioskRecommendationKey(List<Map<String, dynamic>> items) {
-    final parts = items
-        .map((item) => '${item['item_id']}:${item['quantity']}')
-        .toList()
-      ..sort();
+    final parts =
+        items.map((item) => '${item['item_id']}:${item['quantity']}').toList()
+          ..sort();
     return parts.join('|');
   }
 
@@ -125,7 +124,10 @@ class _CartScreenState extends State<CartScreen> {
       return;
     }
 
-    final recs = await DineInService().fetchRecommendations(sessionId, seedItems);
+    final recs = await DineInService().fetchRecommendations(
+      sessionId,
+      seedItems,
+    );
 
     if (!mounted) return;
 
@@ -149,8 +151,7 @@ class _CartScreenState extends State<CartScreen> {
     if (AppConfig.isKiosk) {
       final dineIn = context.read<DineInProvider>();
       final rawId = rec['recommended_item_id'];
-      final itemId =
-          rawId is int ? rawId : int.tryParse(rawId.toString()) ?? 0;
+      final itemId = rawId is int ? rawId : int.tryParse(rawId.toString()) ?? 0;
       if (itemId <= 0) return;
 
       final itemName = (rec['recommended_name'] ?? 'Item').toString();
@@ -167,18 +168,21 @@ class _CartScreenState extends State<CartScreen> {
             _recommendations.removeWhere(
               (r) =>
                   ((r['recommended_item_id'] is int
-                          ? r['recommended_item_id'] as int
-                          : int.tryParse(
-                                  (r['recommended_item_id'] ?? '').toString()) ??
-                              -1) ==
-                      itemId),
+                      ? r['recommended_item_id'] as int
+                      : int.tryParse(
+                              (r['recommended_item_id'] ?? '').toString(),
+                            ) ??
+                            -1) ==
+                  itemId),
             );
           });
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-            content: Text('$itemName added to cart!'),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 1),
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('$itemName added to cart!'),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 1),
+            ),
+          );
         }
         await _loadKioskRecommendations();
       } catch (_) {
@@ -205,13 +209,16 @@ class _CartScreenState extends State<CartScreen> {
       if (mounted) {
         setState(() {
           _recommendations.removeWhere(
-              (r) => r['recommended_item_id'] == itemId);
+            (r) => r['recommended_item_id'] == itemId,
+          );
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text("${rec['recommended_name']} added to cart!"),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 1),
-        ));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("${rec['recommended_name']} added to cart!"),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
       }
     } catch (_) {
       // fail silently
@@ -250,7 +257,8 @@ class _CartScreenState extends State<CartScreen> {
 
       for (final item in dineIn.currentOrderItems) {
         final itemType = (item['item_type'] ?? 'menu_item').toString();
-        final parentQuantity = (item['quantity'] as num?)?.toInt() ??
+        final parentQuantity =
+            (item['quantity'] as num?)?.toInt() ??
             int.tryParse((item['quantity'] ?? '1').toString()) ??
             1;
 
@@ -272,15 +280,20 @@ class _CartScreenState extends State<CartScreen> {
                 ? rawQty
                 : int.tryParse(rawQty.toString()) ?? 1;
 
-            addNormalized(rawItemType, resolvedItemId, resolvedQty * parentQuantity);
+            addNormalized(
+              rawItemType,
+              resolvedItemId,
+              resolvedQty * parentQuantity,
+            );
           }
 
           continue;
         }
 
         final rawId = item['item_id'];
-        final resolvedId =
-            rawId is int ? rawId : int.tryParse(rawId.toString()) ?? 0;
+        final resolvedId = rawId is int
+            ? rawId
+            : int.tryParse(rawId.toString()) ?? 0;
         addNormalized(itemType, resolvedId, parentQuantity);
       }
 
@@ -312,9 +325,9 @@ class _CartScreenState extends State<CartScreen> {
             TextButton(
               onPressed: () {
                 Navigator.pop(context);
-                Navigator.pushNamed(context, '/kiosk-orders');
+                Navigator.pushNamed(context, '/kiosk-table');
               },
-              child: const Text('View Orders'),
+              child: const Text('View My Table'),
             ),
           ],
         ),
@@ -345,9 +358,7 @@ class _CartScreenState extends State<CartScreen> {
 
       return SafeArea(
         child: Scaffold(
-          appBar: AppBar(
-            title: const Text("Your Cart"),
-          ),
+          appBar: AppBar(title: const Text("Your Cart")),
           body: _buildKioskBody(theme, dineIn),
           bottomNavigationBar: const KioskBottomNav(currentIndex: 1),
         ),
@@ -391,7 +402,10 @@ class _CartScreenState extends State<CartScreen> {
 
             if (cart.items.isEmpty) {
               return const Center(
-                child: Text("Your cart is empty", style: TextStyle(fontSize: 16)),
+                child: Text(
+                  "Your cart is empty",
+                  style: TextStyle(fontSize: 16),
+                ),
               );
             }
 
@@ -440,23 +454,27 @@ class _CartScreenState extends State<CartScreen> {
                                 onPressed: cart.isSyncing
                                     ? null
                                     : () async {
-                                  final newQty = item.quantity - 1;
+                                        final newQty = item.quantity - 1;
 
-                                  // item.id is "type:itemId"
-                                  final parts = item.id.split(':');
-                                  final type = parts.first;
-                                  final id = int.tryParse(parts.last) ?? 0;
+                                        // item.id is "type:itemId"
+                                        final parts = item.id.split(':');
+                                        final type = parts.first;
+                                        final id =
+                                            int.tryParse(parts.last) ?? 0;
 
-                                  if (newQty <= 0) {
-                                    await cart.removeById(itemId: id, itemType: type);
-                                  } else {
-                                    await cart.updateQty(
-                                      itemId: id,
-                                      itemType: type,
-                                      quantity: newQty,
-                                    );
-                                  }
-                                },
+                                        if (newQty <= 0) {
+                                          await cart.removeById(
+                                            itemId: id,
+                                            itemType: type,
+                                          );
+                                        } else {
+                                          await cart.updateQty(
+                                            itemId: id,
+                                            itemType: type,
+                                            quantity: newQty,
+                                          );
+                                        }
+                                      },
                               ),
                               Text(
                                 item.quantity.toString(),
@@ -468,16 +486,17 @@ class _CartScreenState extends State<CartScreen> {
                                 onPressed: cart.isSyncing
                                     ? null
                                     : () async {
-                                  final parts = item.id.split(':');
-                                  final type = parts.first;
-                                  final id = int.tryParse(parts.last) ?? 0;
+                                        final parts = item.id.split(':');
+                                        final type = parts.first;
+                                        final id =
+                                            int.tryParse(parts.last) ?? 0;
 
-                                  await cart.updateQty(
-                                    itemId: id,
-                                    itemType: type,
-                                    quantity: item.quantity + 1,
-                                  );
-                                },
+                                        await cart.updateQty(
+                                          itemId: id,
+                                          itemType: type,
+                                          quantity: item.quantity + 1,
+                                        );
+                                      },
                               ),
                             ],
                           ),
@@ -496,8 +515,11 @@ class _CartScreenState extends State<CartScreen> {
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
                         child: Row(
                           children: [
-                            const Icon(Icons.auto_awesome,
-                                color: Color(0xFFD4AF37), size: 16),
+                            const Icon(
+                              Icons.auto_awesome,
+                              color: Color(0xFFD4AF37),
+                              size: 16,
+                            ),
                             const SizedBox(width: 6),
                             Text(
                               "Goes well with your order",
@@ -513,13 +535,11 @@ class _CartScreenState extends State<CartScreen> {
                         height: 120,
                         child: ListView.builder(
                           scrollDirection: Axis.horizontal,
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
                           itemCount: _recommendations.length,
                           itemBuilder: (_, i) {
                             final rec = _recommendations[i];
-                            final itemId =
-                                rec['recommended_item_id'] as int;
+                            final itemId = rec['recommended_item_id'] as int;
                             final isAdding = _addingRec.contains(itemId);
                             return Container(
                               width: 160,
@@ -529,13 +549,13 @@ class _CartScreenState extends State<CartScreen> {
                                 color: theme.colorScheme.surface,
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: const Color(0xFFD4AF37)
-                                      .withValues(alpha: 0.3),
+                                  color: const Color(
+                                    0xFFD4AF37,
+                                  ).withValues(alpha: 0.3),
                                 ),
                               ),
                               child: Column(
-                                crossAxisAlignment:
-                                    CrossAxisAlignment.start,
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
@@ -572,33 +592,37 @@ class _CartScreenState extends State<CartScreen> {
                                       GestureDetector(
                                         onTap: isAdding
                                             ? null
-                                            : () =>
-                                                _addRecommendedItem(rec),
+                                            : () => _addRecommendedItem(rec),
                                         child: AnimatedContainer(
                                           duration: const Duration(
-                                              milliseconds: 200),
+                                            milliseconds: 200,
+                                          ),
                                           width: 28,
                                           height: 28,
                                           decoration: BoxDecoration(
                                             color: isAdding
                                                 ? const Color(0xFF2A2A2A)
                                                 : const Color(0xFFD4AF37),
-                                            borderRadius:
-                                                BorderRadius.circular(8),
+                                            borderRadius: BorderRadius.circular(
+                                              8,
+                                            ),
                                           ),
                                           child: isAdding
                                               ? const Padding(
-                                                  padding:
-                                                      EdgeInsets.all(6),
+                                                  padding: EdgeInsets.all(6),
                                                   child:
                                                       CircularProgressIndicator(
-                                                    strokeWidth: 2,
-                                                    color: Color(0xFFD4AF37),
-                                                  ),
+                                                        strokeWidth: 2,
+                                                        color: Color(
+                                                          0xFFD4AF37,
+                                                        ),
+                                                      ),
                                                 )
-                                              : const Icon(Icons.add,
+                                              : const Icon(
+                                                  Icons.add,
                                                   color: Colors.black,
-                                                  size: 18),
+                                                  size: 18,
+                                                ),
                                         ),
                                       ),
                                     ],
@@ -615,7 +639,10 @@ class _CartScreenState extends State<CartScreen> {
 
                 // ── Order Summary ────────────────────────────────────
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
                   decoration: BoxDecoration(
                     color: theme.colorScheme.surface,
                     boxShadow: [
@@ -628,9 +655,15 @@ class _CartScreenState extends State<CartScreen> {
                   ),
                   child: Column(
                     children: [
-                      _buildSummaryRow("Subtotal", "Rs ${subtotal.toStringAsFixed(2)}"),
+                      _buildSummaryRow(
+                        "Subtotal",
+                        "Rs ${subtotal.toStringAsFixed(2)}",
+                      ),
                       _buildSummaryRow("Tax", "Rs ${tax.toStringAsFixed(2)}"),
-                      _buildSummaryRow("Delivery Fee", "Rs ${deliveryFee.toStringAsFixed(2)}"),
+                      _buildSummaryRow(
+                        "Delivery Fee",
+                        "Rs ${deliveryFee.toStringAsFixed(2)}",
+                      ),
                       const Divider(),
                       _buildSummaryRow(
                         "Total",
@@ -640,7 +673,8 @@ class _CartScreenState extends State<CartScreen> {
                       ),
                       const SizedBox(height: 10),
                       ElevatedButton(
-                        onPressed: (cart.isSyncing ||
+                        onPressed:
+                            (cart.isSyncing ||
                                 cart.cartId == null ||
                                 cart.items.isEmpty)
                             ? null
@@ -699,18 +733,21 @@ class _CartScreenState extends State<CartScreen> {
             itemCount: items.length,
             itemBuilder: (_, index) {
               final item = items[index];
-              final itemId = (item['item_id'] as num?)?.toInt() ??
+              final itemId =
+                  (item['item_id'] as num?)?.toInt() ??
                   int.tryParse((item['item_id'] ?? '0').toString()) ??
                   0;
               final itemType = (item['item_type'] ?? 'menu_item').toString();
               final itemName = (item['item_name'] ?? 'Item').toString();
-              final itemPrice = (item['price'] as num?)?.toDouble() ??
+              final itemPrice =
+                  (item['price'] as num?)?.toDouble() ??
                   double.tryParse((item['price'] ?? '0').toString()) ??
                   0;
-              final quantity = (item['quantity'] as num?)?.toInt() ??
+              final quantity =
+                  (item['quantity'] as num?)?.toInt() ??
                   int.tryParse((item['quantity'] ?? '1').toString()) ??
                   1;
-                final isCustomDeal = itemType == 'custom_deal';
+              final isCustomDeal = itemType == 'custom_deal';
 
               return Card(
                 shape: RoundedRectangleBorder(
@@ -797,8 +834,11 @@ class _CartScreenState extends State<CartScreen> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
                 child: Row(
                   children: [
-                    const Icon(Icons.auto_awesome,
-                        color: Color(0xFFD4AF37), size: 16),
+                    const Icon(
+                      Icons.auto_awesome,
+                      color: Color(0xFFD4AF37),
+                      size: 16,
+                    ),
                     const SizedBox(width: 6),
                     Text(
                       "Goes well with your order",
@@ -831,8 +871,7 @@ class _CartScreenState extends State<CartScreen> {
                         color: theme.colorScheme.surface,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: const Color(0xFFD4AF37)
-                              .withValues(alpha: 0.3),
+                          color: const Color(0xFFD4AF37).withValues(alpha: 0.3),
                         ),
                       ),
                       child: Column(
@@ -890,8 +929,11 @@ class _CartScreenState extends State<CartScreen> {
                                             color: Color(0xFFD4AF37),
                                           ),
                                         )
-                                      : const Icon(Icons.add,
-                                          color: Colors.black, size: 18),
+                                      : const Icon(
+                                          Icons.add,
+                                          color: Colors.black,
+                                          size: 18,
+                                        ),
                                 ),
                               ),
                             ],
@@ -967,10 +1009,10 @@ class _CartScreenState extends State<CartScreen> {
     final isUrl = url.startsWith('http://') || url.startsWith('https://');
 
     final assetPath = type == 'custom_deal'
-      ? 'assets/images/deals/custom_deal.png'
-      : (type == 'deal'
-        ? ImageResolver.getDealImage(name)
-        : ImageResolver.getMenuImage('', name));
+        ? 'assets/images/deals/custom_deal.png'
+        : (type == 'deal'
+              ? ImageResolver.getDealImage(name)
+              : ImageResolver.getMenuImage('', name));
 
     if (isUrl) {
       return Image.network(
@@ -994,18 +1036,20 @@ class _CartScreenState extends State<CartScreen> {
         width: 60,
         height: 60,
         color: Colors.grey.shade200,
-        child: Icon(type == 'deal' ? Icons.local_offer : Icons.fastfood,
-            color: Colors.grey),
+        child: Icon(
+          type == 'deal' ? Icons.local_offer : Icons.fastfood,
+          color: Colors.grey,
+        ),
       ),
     );
   }
 
   Widget _buildSummaryRow(
-      String label,
-      String value, {
-        bool isBold = false,
-        Color color = Colors.grey,
-      }) {
+    String label,
+    String value, {
+    bool isBold = false,
+    Color color = Colors.grey,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
