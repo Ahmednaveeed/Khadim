@@ -86,10 +86,109 @@ class DineInService {
         .toList();
   }
 
+  Future<Map<String, dynamic>> callWaiter(
+    String sessionId, {
+    String? token,
+    bool forCashPayment = false,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/dine-in/sessions/$sessionId/call-waiter')
+        .replace(
+          queryParameters: forCashPayment
+              ? <String, String>{'for_cash_payment': 'true'}
+              : null,
+        );
+
+    final response = await http.post(
+      uri,
+      headers: {
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+    );
+
+    return _handleResponse(response);
+  }
+
+  Future<Map<String, dynamic>> fetchWaiterCallStatus(
+    String sessionId,
+    String callId, {
+    String? token,
+  }) async {
+    final url = Uri.parse(
+      '$_baseUrl/dine-in/sessions/$sessionId/waiter-calls/$callId/status',
+    );
+
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+    );
+
+    return _handleResponse(response);
+  }
+
+  Future<Map<String, dynamic>> settleSessionPayment(
+    String sessionId,
+    String paymentMethod, {
+    String? token,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$_baseUrl/dine-in/sessions/$sessionId/settle-payment'),
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+      body: jsonEncode({'payment_method': paymentMethod}),
+    );
+
+    return _handleResponse(response);
+  }
+
+  Future<Map<String, dynamic>> endSession(
+    String sessionId, {
+    String? token,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$_baseUrl/dine-in/sessions/$sessionId/end'),
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+    );
+
+    return _handleResponse(response);
+  }
+
+  Future<Map<String, dynamic>> fetchSessionOrderTracking(
+    String sessionId,
+    int orderId, {
+    String? token,
+  }) async {
+    final url = Uri.parse(
+      '$_baseUrl/dine-in/sessions/$sessionId/orders/$orderId/tracking',
+    );
+
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+    );
+
+    return _handleResponse(response);
+  }
+
   Map<String, dynamic> _handleResponse(http.Response response) {
-    final dynamic decoded = response.body.isNotEmpty
-        ? jsonDecode(response.body)
-        : {};
+    dynamic decoded = <String, dynamic>{};
+    if (response.body.isNotEmpty) {
+      try {
+        decoded = jsonDecode(response.body);
+      } catch (_) {
+        decoded = response.body;
+      }
+    }
 
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
@@ -98,6 +197,8 @@ class DineInService {
     String errorMessage = 'Request failed';
     if (decoded is Map<String, dynamic> && decoded['detail'] != null) {
       errorMessage = decoded['detail'].toString();
+    } else if (decoded is String && decoded.trim().isNotEmpty) {
+      errorMessage = decoded;
     } else if (response.body.isNotEmpty) {
       errorMessage = response.body;
     }

@@ -22,8 +22,27 @@ class DineInProvider extends ChangeNotifier {
   String? token;
   DateTime? startedAt;
   CardDetails? sessionCard;
+  String? _cachedTableNumber;
+  String? _cachedTablePin;
   List<Map<String, dynamic>> currentOrderItems = [];
   bool isLoading = false;
+
+  String? get cachedTableNumber => _cachedTableNumber;
+  String? get cachedTablePin => _cachedTablePin;
+  bool get hasCachedTableCredentials {
+    return (_cachedTableNumber ?? '').trim().isNotEmpty &&
+        (_cachedTablePin ?? '').trim().isNotEmpty;
+  }
+
+  void cacheTableCredentials(String tableNumber, String pin) {
+    _cachedTableNumber = tableNumber.trim();
+    _cachedTablePin = pin.trim();
+  }
+
+  void clearCachedTableCredentials() {
+    _cachedTableNumber = null;
+    _cachedTablePin = null;
+  }
 
   void startSession(
     String sessionId,

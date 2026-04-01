@@ -2750,3 +2750,18 @@ ALTER TABLE public.orders
     ADD COLUMN IF NOT EXISTS session_id      UUID REFERENCES public.dine_in_sessions(session_id) ON DELETE SET NULL,
     ADD COLUMN IF NOT EXISTS round_number    INTEGER,
     ADD COLUMN IF NOT EXISTS payment_status  VARCHAR(20) DEFAULT NULL;
+
+
+-- 1. waiter_calls table
+CREATE TABLE IF NOT EXISTS waiter_calls (
+    call_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    table_id UUID REFERENCES restaurant_tables(table_id),
+    called_at TIMESTAMP DEFAULT NOW(),
+    resolved BOOLEAN DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS idx_waiter_calls_resolved 
+    ON waiter_calls(resolved);
+
+CREATE INDEX IF NOT EXISTS idx_waiter_calls_table
+    ON waiter_calls(table_id);

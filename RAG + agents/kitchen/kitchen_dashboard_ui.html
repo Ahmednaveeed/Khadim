@@ -3,63 +3,161 @@
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Khadim – Kitchen Dashboard</title>
+  <title>Khadim Kitchen Dashboard</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg: #0f1218;
+      --surface: #171b24;
+      --surface-soft: #1e2430;
+      --line: #2a3240;
+      --text: #e8edf6;
+      --muted: #9aa6b8;
+      --accent: #f1b648;
+      --ok: #59c271;
+      --warn: #f3a64a;
+      --info: #51b6f3;
+      --danger: #f06a6a;
+    }
+
     body {
-      font-family: 'Segoe UI', sans-serif;
-      background: #0f1117;
-      color: #e0e0e0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      background: radial-gradient(1100px 600px at -10% -20%, #263246 0%, var(--bg) 55%);
+      color: var(--text);
       min-height: 100vh;
     }
 
     header {
-      background: #1a1d27;
-      border-bottom: 2px solid #D4AF37;
-      padding: 14px 24px;
+      padding: 14px 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(23, 27, 36, 0.95);
+      position: sticky;
+      top: 0;
+      z-index: 10;
       display: flex;
       align-items: center;
       justify-content: space-between;
-    }
-    header h1 { font-size: 1.3rem; color: #D4AF37; letter-spacing: 1px; }
-    #last-updated { font-size: 0.75rem; color: #888; }
-
-    #main { padding: 24px; }
-
-    #empty-msg {
-      display: none;
-      text-align: center;
-      margin-top: 80px;
-      font-size: 1.4rem;
-      color: #555;
+      gap: 16px;
     }
 
-    .order-block { margin-bottom: 32px; }
+    .header-left h1 {
+      font-size: 1.1rem;
+      letter-spacing: 0.5px;
+      color: var(--accent);
+    }
 
-    .order-header {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: #aaa;
-      text-transform: uppercase;
-      letter-spacing: 1px;
+    .header-left p {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .pill-btn {
+      background: var(--surface-soft);
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 0.78rem;
+      cursor: pointer;
+    }
+
+    .pill-btn:hover { border-color: #3a4658; }
+
+    #last-updated {
+      color: var(--muted);
+      font-size: 0.75rem;
+      min-width: 92px;
+      text-align: right;
+    }
+
+    #layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 18px;
+      padding: 18px;
+    }
+
+    @media (max-width: 1100px) {
+      #layout { grid-template-columns: 1fr; }
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+
+    .panel h2,
+    .panel h3 {
+      font-size: 0.92rem;
+      letter-spacing: 0.4px;
       margin-bottom: 12px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid #2a2d3a;
+      color: #f5f8fe;
     }
-    .order-header span { color: #D4AF37; }
+
+    .order-block { margin-bottom: 16px; }
+
+    .order-head {
+      background: #131823;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      margin-bottom: 10px;
+    }
+
+    .order-row-1 {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.84rem;
+    }
+
+    .order-id { color: var(--accent); font-weight: 700; }
+
+    .status-badge {
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      border: 1px solid;
+      text-transform: uppercase;
+    }
+
+    .status-QUEUED { color: var(--warn); border-color: var(--warn); background: #3c2a10; }
+    .status-IN_PROGRESS { color: var(--info); border-color: var(--info); background: #123348; }
+    .status-READY { color: var(--ok); border-color: var(--ok); background: #1b3b2a; }
+
+    .order-row-2 {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 0.76rem;
+      line-height: 1.35;
+    }
+
+    .order-row-2 strong { color: #d7deea; }
 
     .tasks-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-      gap: 14px;
+      grid-template-columns: repeat(auto-fill, minmax(225px, 1fr));
+      gap: 10px;
     }
 
     .task-card {
-      background: #1a1d27;
-      border-radius: 10px;
-      padding: 16px;
-      border: 1px solid #2a2d3a;
+      background: #121722;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 11px;
       display: flex;
       flex-direction: column;
       gap: 8px;
@@ -69,102 +167,219 @@
       display: flex;
       justify-content: space-between;
       align-items: flex-start;
+      gap: 8px;
     }
 
-    .item-name { font-weight: 600; font-size: 0.95rem; }
-    .item-qty  { font-size: 0.8rem; color: #888; }
+    .item-name { font-size: 0.84rem; font-weight: 700; }
+    .item-qty { font-size: 0.74rem; color: var(--muted); margin-top: 2px; }
 
-    .badge {
-      display: inline-block;
-      padding: 2px 10px;
-      border-radius: 20px;
-      font-size: 0.72rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+    .task-meta {
+      color: var(--muted);
+      font-size: 0.74rem;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
     }
-    .badge-QUEUED      { background: #3a2800; color: #f5a623; border: 1px solid #f5a623; }
-    .badge-IN_PROGRESS { background: #002040; color: #4db6ff; border: 1px solid #4db6ff; }
-    .badge-READY       { background: #002a10; color: #4caf50; border: 1px solid #4caf50; }
 
-    .task-meta { font-size: 0.78rem; color: #999; display: flex; gap: 16px; }
-    .task-meta strong { color: #ccc; }
+    .task-meta strong { color: #d2d8e3; font-size: 0.7rem; }
 
     .action-btn {
-      margin-top: 6px;
-      padding: 8px 0;
-      width: 100%;
       border: none;
-      border-radius: 6px;
-      font-size: 0.82rem;
-      font-weight: 600;
+      border-radius: 8px;
+      padding: 8px;
+      font-size: 0.75rem;
+      font-weight: 700;
       cursor: pointer;
-      transition: opacity 0.15s;
     }
-    .action-btn:hover { opacity: 0.85; }
-    .action-btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
-    .btn-start    { background: #f5a623; color: #000; }
-    .btn-ready    { background: #4db6ff; color: #000; }
-    .btn-complete { background: #4caf50; color: #000; }
+    .action-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-start { background: var(--warn); color: #101010; }
+    .btn-ready { background: var(--info); color: #101010; }
+    .btn-complete { background: var(--ok); color: #101010; }
+
+    .table-card,
+    .call-card {
+      background: #131925;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 9px;
+    }
+
+    .table-head,
+    .call-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      margin-bottom: 6px;
+    }
+
+    .tiny {
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.35;
+    }
+
+    .mini-btn {
+      margin-top: 8px;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #202838;
+      color: var(--text);
+      padding: 7px;
+      font-size: 0.74rem;
+      cursor: pointer;
+    }
+
+    .mini-btn.primary {
+      background: #3a2b17;
+      border-color: #8c6f3c;
+      color: #ffd89a;
+    }
+
+    .mini-btn.success {
+      background: #1a3c2c;
+      border-color: #3f8f67;
+      color: #adf0c8;
+    }
+
+    .empty {
+      color: var(--muted);
+      font-size: 0.8rem;
+      padding: 6px 2px;
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>🍽️ Khadim Kitchen Dashboard</h1>
-    <span id="last-updated">Loading…</span>
+    <div class="header-left">
+      <h1>Kitchen Operations Dashboard</h1>
+      <p>FastAPI live view for tasks, tables, and waiter calls</p>
+    </div>
+    <div class="header-right">
+      <button class="pill-btn" id="refresh-btn">Refresh Now</button>
+      <span id="last-updated">Loading...</span>
+    </div>
   </header>
 
-  <div id="main">
-    <div id="orders-container"></div>
-    <div id="empty-msg">No active orders 🎉</div>
+  <div id="layout">
+    <section class="panel" id="orders-panel">
+      <h2>Active Kitchen Orders</h2>
+      <div id="orders-container"></div>
+      <div id="orders-empty" class="empty" style="display:none;">No active orders.</div>
+    </section>
+
+    <aside>
+      <section class="panel">
+        <h3>Table Status</h3>
+        <div id="tables-container"></div>
+        <div id="tables-empty" class="empty" style="display:none;">No tables found.</div>
+      </section>
+
+      <section class="panel">
+        <h3>Waiter Calls</h3>
+        <div id="calls-container"></div>
+        <div id="calls-empty" class="empty" style="display:none;">No active waiter calls.</div>
+      </section>
+    </aside>
   </div>
 
   <script>
-    async function loadOrders() {
+    const TABLE_STATUS_ICONS = {
+      available: '🟢',
+      occupied: '🟡',
+      bill_requested_cash: '🟠',
+      bill_requested_card: '🔵',
+      cleaning: '⚫',
+    };
+
+    function fmtTime(iso) {
+      if (!iso) return '-';
       try {
-        const res = await fetch('/kitchen/orders');
-        const data = await res.json();
-        renderOrders(data.orders || []);
-        document.getElementById('last-updated').textContent =
-          'Updated: ' + new Date().toLocaleTimeString();
-      } catch (e) {
-        console.error('Failed to load orders:', e);
+        return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      } catch {
+        return '-';
       }
+    }
+
+    function esc(value) {
+      if (value == null) return '';
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    async function requestJSON(url, options = {}) {
+      const res = await fetch(url, options);
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(payload.detail || payload.message || `Request failed (${res.status})`);
+      }
+      return payload;
+    }
+
+    async function loadOrders() {
+      const data = await requestJSON('/kitchen/orders');
+      renderOrders(data.orders || []);
+    }
+
+    async function loadTables() {
+      const data = await requestJSON('/kitchen/tables');
+      renderTables(data.tables || []);
+    }
+
+    async function loadWaiterCalls() {
+      const data = await requestJSON('/kitchen/waiter-calls');
+      renderWaiterCalls(data.calls || []);
     }
 
     function renderOrders(orders) {
       const container = document.getElementById('orders-container');
-      const emptyMsg  = document.getElementById('empty-msg');
+      const empty = document.getElementById('orders-empty');
       container.innerHTML = '';
 
       if (!orders.length) {
-        emptyMsg.style.display = 'block';
+        empty.style.display = 'block';
         return;
       }
-      emptyMsg.style.display = 'none';
+
+      empty.style.display = 'none';
 
       for (const order of orders) {
         const block = document.createElement('div');
         block.className = 'order-block';
 
+        const customer = esc(order.customer_name || 'Unknown');
+        const customerId = order.customer_id ? esc(order.customer_id.substring(0, 8)) : 'N/A';
+        const overall = esc((order.overall_status || '').replaceAll('_', ' '));
+        const orderType = (order.order_type || 'delivery').toLowerCase();
+        const dineInLine = orderType === 'dine_in'
+          ? `🪑 <strong>Table ${esc(order.table_number || '-')}</strong> - Round ${order.round_number ?? '-'}`
+          : `🛵 <strong>Delivery</strong>`;
+
         const header = document.createElement('div');
-        header.className = 'order-header';
-        const cname = order.customer_name || 'Unknown';
-        const cid = order.customer_id ? order.customer_id.substring(0,8) : 'N/A';
+        header.className = 'order-head';
         header.innerHTML = `
-          Order <span>#${order.order_id}</span>
-          &nbsp;–&nbsp;
-          <span style="color:#ffffff;font-weight:700">${cname}</span>
-          <span style="color:#aaa;font-size:0.8rem"> &nbsp;(ID: ${cid})</span>
-          &nbsp;&nbsp;Overall: <span>${order.overall_status.replace('_',' ')}</span>
+          <div class="order-row-1">
+            <div>
+              <span class="order-id">Order #${order.order_id}</span>
+              <span style="color:var(--muted);margin-left:8px;">${customer} (ID: ${customerId})</span>
+            </div>
+            <span class="status-badge status-${order.overall_status}">${overall}</span>
+          </div>
+          <div class="order-row-2">${dineInLine}</div>
         `;
         block.appendChild(header);
 
         const grid = document.createElement('div');
         grid.className = 'tasks-grid';
-
-        for (const task of order.tasks) {
+        for (const task of order.tasks || []) {
           grid.appendChild(buildTaskCard(task));
         }
 
@@ -176,20 +391,19 @@
     function buildTaskCard(task) {
       const card = document.createElement('div');
       card.className = 'task-card';
-      card.id = `task-${task.task_id}`;
 
       card.innerHTML = `
         <div class="task-header">
           <div>
-            <div class="item-name">${task.item_name}</div>
+            <div class="item-name">${esc(task.item_name)}</div>
             <div class="item-qty">Qty: ${task.qty}</div>
           </div>
-          <span class="badge badge-${task.status}">${task.status.replace('_', ' ')}</span>
+          <span class="status-badge status-${task.status}">${esc(task.status.replaceAll('_', ' '))}</span>
         </div>
         <div class="task-meta">
-          <div><strong>Station</strong><br>${task.station}</div>
-          <div><strong>Chef</strong><br>${task.assigned_chef}</div>
-          <div><strong>Est.</strong><br>${task.estimated_minutes} min</div>
+          <div><strong>Station</strong><br>${esc(task.station)}</div>
+          <div><strong>Chef</strong><br>${esc(task.assigned_chef)}</div>
+          <div><strong>ETA</strong><br>${task.estimated_minutes || 0}m</div>
         </div>
       `;
 
@@ -199,44 +413,181 @@
       if (task.status === 'QUEUED') {
         btn.textContent = 'Start Preparing';
         btn.classList.add('btn-start');
-        btn.onclick = () => updateStatus(task.task_id, 'IN_PROGRESS', btn);
+        btn.onclick = () => updateTaskStatus(task.task_id, 'IN_PROGRESS', btn);
       } else if (task.status === 'IN_PROGRESS') {
         btn.textContent = 'Mark Ready';
         btn.classList.add('btn-ready');
-        btn.onclick = () => updateStatus(task.task_id, 'READY', btn);
+        btn.onclick = () => updateTaskStatus(task.task_id, 'READY', btn);
       } else if (task.status === 'READY') {
         btn.textContent = 'Complete & Remove';
         btn.classList.add('btn-complete');
-        btn.onclick = () => updateStatus(task.task_id, 'COMPLETED', btn);
+        btn.onclick = () => updateTaskStatus(task.task_id, 'COMPLETED', btn);
       }
 
       card.appendChild(btn);
       return card;
     }
 
-    async function updateStatus(taskId, newStatus, btn) {
-      btn.disabled = true;
-      btn.textContent = 'Updating…';
+    function renderTables(tables) {
+      const container = document.getElementById('tables-container');
+      const empty = document.getElementById('tables-empty');
+      container.innerHTML = '';
+
+      if (!tables.length) {
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+
+      for (const table of tables) {
+        const status = table.status || 'unknown';
+        const icon = TABLE_STATUS_ICONS[status] || '⚪';
+        const card = document.createElement('div');
+        card.className = 'table-card';
+        card.innerHTML = `
+          <div class="table-head">
+            <strong>${icon} ${esc(table.table_number)}</strong>
+            <span class="tiny">${esc(status.replaceAll('_', ' '))}</span>
+          </div>
+          <div class="tiny">Started: ${fmtTime(table.started_at)}</div>
+          <div class="tiny">Rounds: ${table.round_count || 0} | Total: Rs ${Number(table.total_amount || 0).toFixed(0)}</div>
+        `;
+
+        if (status === 'bill_requested_cash' && table.session_id) {
+          const btn = document.createElement('button');
+          btn.className = 'mini-btn primary';
+          btn.textContent = `Confirm Cash - ${table.table_number}`;
+          btn.onclick = () => confirmCash(table.session_id, btn);
+          card.appendChild(btn);
+        }
+
+        if (status === 'cleaning') {
+          const btn = document.createElement('button');
+          btn.className = 'mini-btn success';
+          btn.textContent = `Mark ${table.table_number} Ready`;
+          btn.onclick = () => markTableReady(table.table_id, btn);
+          card.appendChild(btn);
+        }
+
+        container.appendChild(card);
+      }
+    }
+
+    function renderWaiterCalls(calls) {
+      const container = document.getElementById('calls-container');
+      const empty = document.getElementById('calls-empty');
+      container.innerHTML = '';
+
+      if (!calls.length) {
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+
+      for (const call of calls) {
+        const card = document.createElement('div');
+        card.className = 'call-card';
+        card.innerHTML = `
+          <div class="call-head">
+            <strong>${esc(call.table_number)}</strong>
+            <span class="tiny">${fmtTime(call.called_at)}</span>
+          </div>
+        `;
+
+        const btn = document.createElement('button');
+        btn.className = 'mini-btn';
+        btn.textContent = 'Resolve';
+        btn.onclick = () => resolveWaiterCall(call.call_id, btn);
+        card.appendChild(btn);
+
+        container.appendChild(card);
+      }
+    }
+
+    async function updateTaskStatus(taskId, newStatus, button) {
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = 'Updating...';
       try {
-        const res = await fetch(`/kitchen/tasks/${encodeURIComponent(taskId)}/update-status`, {
+        await requestJSON(`/kitchen/tasks/${encodeURIComponent(taskId)}/update-status`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ new_status: newStatus }),
         });
-        const data = await res.json();
-        if (!data.success) {
-          alert('Update failed: ' + (data.message || 'Unknown error'));
-          btn.disabled = false;
-        }
-      } catch (e) {
-        alert('Network error: ' + e);
-        btn.disabled = false;
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
       }
-      await loadOrders();
+      await refreshAll();
     }
 
-    loadOrders();
-    setInterval(loadOrders, 5000);
+    async function confirmCash(sessionId, button) {
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = 'Confirming...';
+      try {
+        await requestJSON(`/kitchen/sessions/${encodeURIComponent(sessionId)}/confirm-cash`, {
+          method: 'POST',
+        });
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+      await refreshAll();
+    }
+
+    async function markTableReady(tableId, button) {
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = 'Updating...';
+      try {
+        await requestJSON(`/kitchen/tables/${encodeURIComponent(tableId)}/mark-ready`, {
+          method: 'POST',
+        });
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+      await refreshAll();
+    }
+
+    async function resolveWaiterCall(callId, button) {
+      button.disabled = true;
+      const originalText = button.textContent;
+      button.textContent = 'Resolving...';
+      try {
+        await requestJSON(`/kitchen/waiter-calls/${encodeURIComponent(callId)}/resolve`, {
+          method: 'POST',
+        });
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+      await refreshAll();
+    }
+
+    async function refreshAll() {
+      try {
+        await Promise.all([loadOrders(), loadTables(), loadWaiterCalls()]);
+      } catch (error) {
+        console.error(error);
+      }
+      document.getElementById('last-updated').textContent =
+        'Updated: ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
+
+    document.getElementById('refresh-btn').addEventListener('click', refreshAll);
+
+    refreshAll();
+    setInterval(refreshAll, 5000);
   </script>
 </body>
 </html>

@@ -70,7 +70,10 @@ class _TablePinScreenState extends State<TablePinScreen> {
 
       if (!mounted) return;
 
-      context.read<DineInProvider>().startSession(
+      final dineInProvider = context.read<DineInProvider>();
+      dineInProvider.cacheTableCredentials(resolvedTableNumber, pin);
+
+      dineInProvider.startSession(
         sessionId,
         tableId,
         resolvedTableNumber,

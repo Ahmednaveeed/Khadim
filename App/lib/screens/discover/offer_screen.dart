@@ -8,6 +8,7 @@ import 'package:khaadim/services/offer_service.dart';
 import 'package:khaadim/services/deal_service.dart';
 import 'package:khaadim/services/favorites_service.dart';
 import 'package:khaadim/providers/cart_provider.dart';
+import 'package:khaadim/providers/dine_in_provider.dart';
 import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
 import 'package:khaadim/utils/ImageResolver.dart';
 import 'package:khaadim/screens/cart/cart_screen.dart';
@@ -33,27 +34,37 @@ class _OffersScreenState extends State<OffersScreen> {
   String _selectedServing = 'All';
 
   static const List<String> _cuisineFilters = [
-    'All', 'Fast Food', 'Chinese', 'BBQ', 'Desi',
+    'All',
+    'Fast Food',
+    'Chinese',
+    'BBQ',
+    'Desi',
   ];
-  static const List<String> _servingFilters = [
-    'All', '1', '2', '3', '4', '5+',
-  ];
+  static const List<String> _servingFilters = ['All', '1', '2', '3', '4', '5+'];
 
   List<DealModel> get _filteredDeals {
     return deals.where((d) {
       final q = _searchQuery.toLowerCase();
-      final matchesSearch = q.isEmpty ||
+      final matchesSearch =
+          q.isEmpty ||
           d.dealName.toLowerCase().contains(q) ||
           d.items.toLowerCase().contains(q);
 
-      final matchesCuisine = _selectedCuisine == 'All' ||
-          d.dealName.toLowerCase().contains(_selectedCuisine.toLowerCase().replaceAll(' ', ''))  ||
-          d.dealName.toLowerCase().startsWith(_selectedCuisine.split(' ').first.toLowerCase());
+      final matchesCuisine =
+          _selectedCuisine == 'All' ||
+          d.dealName.toLowerCase().contains(
+            _selectedCuisine.toLowerCase().replaceAll(' ', ''),
+          ) ||
+          d.dealName.toLowerCase().startsWith(
+            _selectedCuisine.split(' ').first.toLowerCase(),
+          );
 
-      final matchesServing = _selectedServing == 'All' || (() {
-        if (_selectedServing == '5+') return d.servingSize >= 5;
-        return d.servingSize == int.tryParse(_selectedServing);
-      })();
+      final matchesServing =
+          _selectedServing == 'All' ||
+          (() {
+            if (_selectedServing == '5+') return d.servingSize >= 5;
+            return d.servingSize == int.tryParse(_selectedServing);
+          })();
 
       return matchesSearch && matchesCuisine && matchesServing;
     }).toList();
@@ -67,7 +78,6 @@ class _OffersScreenState extends State<OffersScreen> {
     "BBQ": "assets/images/deals/BBQ deals/bbq_solo.png",
     "Drinks": "assets/images/confirm.png",
   };
-
 
   @override
   void initState() {
@@ -148,234 +158,244 @@ class _OffersScreenState extends State<OffersScreen> {
         body: loading
             ? const Center(child: CircularProgressIndicator())
             : RefreshIndicator(
-          onRefresh: _loadData,
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              // ==========================
-              //     BANNERS (OFFERS)
-              // ==========================
-              if (offers.isNotEmpty) ...[
-                SizedBox(
-                  height: 180,
-                  child: PageView.builder(
-                    controller: _pageController,
-                    itemCount: offers.length,
-                    onPageChanged: (index) {
-                      setState(() => _currentPage = index);
-                    },
-                    itemBuilder: (_, index) {
-                      final offer = offers[index];
-                      final bannerImage =
-                          offerBannerImages[offer.category] ??
-                              offerBannerImages["Fast Food"]!;
+                onRefresh: _loadData,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // ==========================
+                    //     BANNERS (OFFERS)
+                    // ==========================
+                    if (offers.isNotEmpty) ...[
+                      SizedBox(
+                        height: 180,
+                        child: PageView.builder(
+                          controller: _pageController,
+                          itemCount: offers.length,
+                          onPageChanged: (index) {
+                            setState(() => _currentPage = index);
+                          },
+                          itemBuilder: (_, index) {
+                            final offer = offers[index];
+                            final bannerImage =
+                                offerBannerImages[offer.category] ??
+                                offerBannerImages["Fast Food"]!;
 
-                      return AnimatedContainer(
-                        duration: const Duration(milliseconds: 400),
-                        margin:
-                        const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(16),
-                          image: DecorationImage(
-                            image: AssetImage(bannerImage),
-                            fit: BoxFit.cover,
-                            onError: (_, __) {},
-                          ),
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 400),
+                              margin: const EdgeInsets.symmetric(horizontal: 8),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                image: DecorationImage(
+                                  image: AssetImage(bannerImage),
+                                  fit: BoxFit.cover,
+                                  onError: (_, __) {},
+                                ),
+                              ),
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(16),
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.black.withOpacity(0.5),
+                                      Colors.transparent,
+                                    ],
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                  ),
+                                ),
+                                padding: const EdgeInsets.all(12),
+                                alignment: Alignment.bottomLeft,
+                                child: Text(
+                                  offer.title,
+                                  style: theme.textTheme.titleMedium?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
                         ),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(16),
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.black.withOpacity(0.5),
-                                Colors.transparent,
-                              ],
-                              begin: Alignment.bottomCenter,
-                              end: Alignment.topCenter,
+                      ),
+
+                      const SizedBox(height: 10),
+
+                      // DOT INDICATORS
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(
+                          offers.length,
+                          (index) => AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            width: _currentPage == index ? 12 : 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: _currentPage == index
+                                  ? Colors.orangeAccent
+                                  : Colors.grey,
+                              borderRadius: BorderRadius.circular(8),
                             ),
                           ),
-                          padding: const EdgeInsets.all(12),
-                          alignment: Alignment.bottomLeft,
-                          child: Text(
-                            offer.title,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
+                        ),
+                      ),
+
+                      const SizedBox(height: 24),
+                    ],
+
+                    // ==========================
+                    //     OFFERS LIST (TEXT)
+                    // ==========================
+                    if (offers.isNotEmpty) ...[
+                      Text(
+                        "Promotional Offers",
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      ...offers.map((offer) {
+                        final img =
+                            offerBannerImages[offer.category] ??
+                            offerBannerImages["Fast Food"]!;
+
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: _buildOfferCard(
+                            context,
+                            title: offer.title,
+                            description: offer.description,
+                            image: img,
+                            validity: "Valid till ${offer.validity}",
+                            code: offer.offerCode,
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 24),
+                    ],
+
+                    // ==========================
+                    //       DEALS LIST
+                    // ==========================
+                    Text(
+                      "Combo Deals",
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Search bar
+                    TextField(
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                      decoration: InputDecoration(
+                        hintText: 'Search deals…',
+                        prefixIcon: const Icon(Icons.search),
+                        filled: true,
+                        fillColor: theme.colorScheme.surface,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: 10,
+                          horizontal: 12,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Cuisine filter chips
+                    SizedBox(
+                      height: 38,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: _cuisineFilters.map((c) {
+                          final selected = c == _selectedCuisine;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(c),
+                              selected: selected,
+                              onSelected: (_) =>
+                                  setState(() => _selectedCuisine = c),
                             ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // Serving size filter chips
+                    SizedBox(
+                      height: 38,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: _servingFilters.map((s) {
+                          final selected = s == _selectedServing;
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(
+                                s == 'All' ? 'All Sizes' : '$s Person',
+                              ),
+                              selected: selected,
+                              onSelected: (_) =>
+                                  setState(() => _selectedServing = s),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Results count
+                    if (_searchQuery.isNotEmpty ||
+                        _selectedCuisine != 'All' ||
+                        _selectedServing != 'All')
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(
+                          '${_filteredDeals.length} deal${_filteredDeals.length == 1 ? '' : 's'} found',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.hintColor,
                           ),
                         ),
-                      );
-                    },
-                  ),
-                ),
-
-                const SizedBox(height: 10),
-
-                // DOT INDICATORS
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: List.generate(
-                    offers.length,
-                        (index) => AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      margin: const EdgeInsets.symmetric(horizontal: 4),
-                      width: _currentPage == index ? 12 : 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: _currentPage == index
-                            ? Colors.orangeAccent
-                            : Colors.grey,
-                        borderRadius: BorderRadius.circular(8),
                       ),
-                    ),
-                  ),
-                ),
 
-                const SizedBox(height: 24),
-              ],
-
-              // ==========================
-              //     OFFERS LIST (TEXT)
-              // ==========================
-              if (offers.isNotEmpty) ...[
-                Text(
-                  "Promotional Offers",
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...offers.map((offer) {
-                  final img =
-                      offerBannerImages[offer.category] ??
-                          offerBannerImages["Fast Food"]!;
-
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: _buildOfferCard(
-                      context,
-                      title: offer.title,
-                      description: offer.description,
-                      image: img,
-                      validity: "Valid till ${offer.validity}",
-                      code: offer.offerCode,
-                    ),
-                  );
-                }),
-                const SizedBox(height: 24),
-              ],
-
-              // ==========================
-              //       DEALS LIST
-              // ==========================
-              Text(
-                "Combo Deals",
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
+                    if (_filteredDeals.isEmpty)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 32),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              const Icon(
+                                Icons.search_off,
+                                size: 48,
+                                color: Colors.grey,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No deals match your filters',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else
+                      ..._filteredDeals.map((deal) {
+                        final img = ImageResolver.getDealImage(deal.dealName);
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: _DealCard(deal: deal, image: img),
+                        );
+                      }),
+                  ],
                 ),
               ),
-              const SizedBox(height: 12),
-
-              // Search bar
-              TextField(
-                onChanged: (v) => setState(() => _searchQuery = v),
-                decoration: InputDecoration(
-                  hintText: 'Search deals…',
-                  prefixIcon: const Icon(Icons.search),
-                  filled: true,
-                  fillColor: theme.colorScheme.surface,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(
-                      vertical: 10, horizontal: 12),
-                ),
-              ),
-              const SizedBox(height: 10),
-
-              // Cuisine filter chips
-              SizedBox(
-                height: 38,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: _cuisineFilters.map((c) {
-                    final selected = c == _selectedCuisine;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(c),
-                        selected: selected,
-                        onSelected: (_) =>
-                            setState(() => _selectedCuisine = c),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // Serving size filter chips
-              SizedBox(
-                height: 38,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
-                  children: _servingFilters.map((s) {
-                    final selected = s == _selectedServing;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(s == 'All' ? 'All Sizes' : '$s Person'),
-                        selected: selected,
-                        onSelected: (_) =>
-                            setState(() => _selectedServing = s),
-                      ),
-                    );
-                  }).toList(),
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // Results count
-              if (_searchQuery.isNotEmpty ||
-                  _selectedCuisine != 'All' ||
-                  _selectedServing != 'All')
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: Text(
-                    '${_filteredDeals.length} deal${_filteredDeals.length == 1 ? '' : 's'} found',
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.hintColor),
-                  ),
-                ),
-
-              if (_filteredDeals.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 32),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        const Icon(Icons.search_off,
-                            size: 48, color: Colors.grey),
-                        const SizedBox(height: 8),
-                        Text('No deals match your filters',
-                            style: theme.textTheme.bodyMedium
-                                ?.copyWith(color: Colors.grey)),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                ..._filteredDeals.map((deal) {
-                  final img = ImageResolver.getDealImage(deal.dealName);
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: _DealCard(deal: deal, image: img),
-                  );
-                }),
-            ],
-          ),
-        ),
         bottomNavigationBar: AppConfig.isKiosk
             ? const KioskBottomNav(currentIndex: 2)
             : null,
@@ -385,13 +405,13 @@ class _OffersScreenState extends State<OffersScreen> {
 
   /// OFFER CARD
   Widget _buildOfferCard(
-      BuildContext context, {
-        required String title,
-        required String description,
-        required String image,
-        required String validity,
-        required String code,
-      }) {
+    BuildContext context, {
+    required String title,
+    required String description,
+    required String image,
+    required String validity,
+    required String code,
+  }) {
     final theme = Theme.of(context);
 
     return Container(
@@ -440,10 +460,7 @@ class _OffersScreenState extends State<OffersScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    description,
-                    style: theme.textTheme.bodyMedium,
-                  ),
+                  Text(description, style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 8),
                   if (code.isNotEmpty)
                     Text(
@@ -456,10 +473,7 @@ class _OffersScreenState extends State<OffersScreen> {
                   const SizedBox(height: 4),
                   Text(
                     validity,
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 12,
-                    ),
+                    style: const TextStyle(color: Colors.grey, fontSize: 12),
                   ),
                 ],
               ),
@@ -472,13 +486,13 @@ class _OffersScreenState extends State<OffersScreen> {
 
   /// DEAL CARD
   Widget _buildDealCard(
-      BuildContext context, {
-        required String image,
-        required String title,
-        required String subtitle,
-        required String newPrice,
-        required String discount,
-      }) {
+    BuildContext context, {
+    required String image,
+    required String title,
+    required String subtitle,
+    required String newPrice,
+    required String discount,
+  }) {
     final theme = Theme.of(context);
 
     return Container(
@@ -660,20 +674,79 @@ class _DealCardState extends State<_DealCard> {
       if (!mounted) return;
       final added = res['action'] == 'added';
       setState(() => _isFav = added);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(
-            added ? 'Added to favourites' : 'Removed from favourites'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 1),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            added ? 'Added to favourites' : 'Removed from favourites',
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 1),
+        ),
+      );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(e.toString()),
-        behavior: SnackBarBehavior.floating,
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     } finally {
       if (mounted) setState(() => _toggling = false);
+    }
+  }
+
+  Future<void> _handleAddDeal() async {
+    if (AppConfig.isKiosk) {
+      final dineIn = context.read<DineInProvider>();
+      if (dineIn.sessionId == null || dineIn.sessionId!.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please start a table session first.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+
+      dineIn.addItem(
+        widget.deal.dealId,
+        'deal',
+        widget.deal.dealName,
+        widget.deal.dealPrice,
+        1,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${widget.deal.dealName} added to cart'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await context.read<CartProvider>().addDeal(widget.deal);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${widget.deal.dealName} added to cart'),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 1),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
     }
   }
 
@@ -737,7 +810,9 @@ class _DealCardState extends State<_DealCard> {
                     const SizedBox(width: 4),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
+                        horizontal: 8,
+                        vertical: 4,
+                      ),
                       decoration: BoxDecoration(
                         color: Colors.redAccent,
                         borderRadius: BorderRadius.circular(8),
@@ -745,9 +820,10 @@ class _DealCardState extends State<_DealCard> {
                       child: Text(
                         '${deal.servingSize} Person',
                         style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold),
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
                     ),
                     if (!AppConfig.isKiosk) ...[
@@ -790,21 +866,14 @@ class _DealCardState extends State<_DealCard> {
                       ),
                     ),
                     ElevatedButton(
-                      onPressed: () {
-                        context.read<CartProvider>().addDeal(widget.deal);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('${widget.deal.dealName} added to cart'),
-                            behavior: SnackBarBehavior.floating,
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      },
+                      onPressed: _handleAddDeal,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.orangeAccent,
                         foregroundColor: Colors.white,
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 6),
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
                       ),
                       child: const Text('Add'),
                     ),

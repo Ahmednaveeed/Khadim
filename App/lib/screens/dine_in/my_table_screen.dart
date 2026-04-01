@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:khaadim/app_config.dart';
 import 'package:khaadim/providers/dine_in_provider.dart';
 import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
-import 'package:khaadim/screens/orders/order_tracking_screen.dart';
 import 'package:khaadim/services/dine_in_service.dart';
 import 'package:provider/provider.dart';
 
@@ -67,8 +66,15 @@ class _MyTableScreenState extends State<MyTableScreen> {
   String? _roundsError;
   List<_SessionRound> _rounds = <_SessionRound>[];
   _WaiterRequestState _waiterRequestState = _WaiterRequestState.idle;
+  String? _activeWaiterCallId;
 
   Timer? _durationTicker;
+  Timer? _waiterStatusPoller;
+  Timer? _waiterAckResetTimer;
+  Timer? _paymentSettlementPoller;
+
+  bool _isPaymentResetInProgress = false;
+  bool _isSettlementPopupVisible = false;
 
   @override
   void initState() {
@@ -87,7 +93,241 @@ class _MyTableScreenState extends State<MyTableScreen> {
   @override
   void dispose() {
     _durationTicker?.cancel();
+    _waiterStatusPoller?.cancel();
+    _waiterAckResetTimer?.cancel();
+    _paymentSettlementPoller?.cancel();
     super.dispose();
+  }
+
+  void _stopWaiterPolling() {
+    _waiterStatusPoller?.cancel();
+    _waiterStatusPoller = null;
+  }
+
+  void _scheduleWaiterAckReset() {
+    _waiterAckResetTimer?.cancel();
+    _waiterAckResetTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted) return;
+      setState(() {
+        _waiterRequestState = _WaiterRequestState.idle;
+        _activeWaiterCallId = null;
+      });
+    });
+  }
+
+  Future<void> _pollWaiterCallStatus() async {
+    final callId = _activeWaiterCallId;
+    if (callId == null || callId.isEmpty || !mounted) {
+      return;
+    }
+
+    final dineIn = context.read<DineInProvider>();
+    final sessionId = dineIn.sessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      _stopWaiterPolling();
+      return;
+    }
+
+    try {
+      final statusData = await _dineInService.fetchWaiterCallStatus(
+        sessionId,
+        callId,
+        token: dineIn.token,
+      );
+
+      if (!mounted) return;
+      final isResolved = statusData['resolved'] == true;
+      if (!isResolved ||
+          _waiterRequestState == _WaiterRequestState.acknowledged) {
+        return;
+      }
+
+      _stopWaiterPolling();
+      setState(() {
+        _waiterRequestState = _WaiterRequestState.acknowledged;
+      });
+
+      _scheduleWaiterAckReset();
+    } catch (_) {
+      // Ignore transient polling errors and keep retrying.
+    }
+  }
+
+  void _startWaiterPolling() {
+    _stopWaiterPolling();
+    _waiterStatusPoller = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollWaiterCallStatus();
+    });
+  }
+
+  void _startPaymentSettlementPolling() {
+    if (_paymentSettlementPoller != null) {
+      return;
+    }
+
+    _paymentSettlementPoller = Timer.periodic(const Duration(seconds: 4), (_) {
+      _pollSettlementStatus();
+    });
+  }
+
+  void _stopPaymentSettlementPolling() {
+    _paymentSettlementPoller?.cancel();
+    _paymentSettlementPoller = null;
+  }
+
+  void _syncPaymentSettlementPolling(List<_SessionRound> rounds) {
+    final hasPendingPayment = rounds.any((round) => !round.isPaid);
+    if (hasPendingPayment) {
+      _startPaymentSettlementPolling();
+      return;
+    }
+
+    _stopPaymentSettlementPolling();
+  }
+
+  Future<bool> _tryStartFreshSession(DineInProvider dineIn) async {
+    final cachedTableNumber = dineIn.cachedTableNumber;
+    final cachedTablePin = dineIn.cachedTablePin;
+
+    if (cachedTableNumber == null ||
+        cachedTableNumber.trim().isEmpty ||
+        cachedTablePin == null ||
+        cachedTablePin.trim().isEmpty) {
+      return false;
+    }
+
+    final loginResult = await _dineInService.tableLogin(
+      cachedTableNumber.trim(),
+      cachedTablePin.trim(),
+    );
+
+    final sessionId = (loginResult['session_id'] ?? '').toString();
+    final tableId = (loginResult['table_id'] ?? '').toString();
+    final resolvedTableNumber =
+        (loginResult['table_number'] ?? cachedTableNumber).toString();
+    final token = (loginResult['token'] ?? loginResult['access_token'] ?? '')
+        .toString();
+    final startedAtRaw = (loginResult['started_at'] ?? '').toString();
+    final startedAt = startedAtRaw.isEmpty
+        ? null
+        : DateTime.tryParse(startedAtRaw);
+
+    if (sessionId.isEmpty || tableId.isEmpty) {
+      return false;
+    }
+
+    dineIn.cacheTableCredentials(resolvedTableNumber, cachedTablePin);
+    dineIn.startSession(
+      sessionId,
+      tableId,
+      resolvedTableNumber,
+      token: token.isEmpty ? null : token,
+      startedAt: startedAt,
+    );
+    return true;
+  }
+
+  Future<void> _handleSessionSettledAndReset({required String message}) async {
+    if (!mounted || _isPaymentResetInProgress) {
+      return;
+    }
+
+    setState(() {
+      _isPaymentResetInProgress = true;
+    });
+
+    _stopWaiterPolling();
+    _stopPaymentSettlementPolling();
+
+    _isSettlementPopupVisible = true;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) {
+        return AlertDialog(
+          title: const Text('Payment Confirmed'),
+          content: Text(message),
+        );
+      },
+    ).whenComplete(() {
+      _isSettlementPopupVisible = false;
+    });
+
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) {
+      return;
+    }
+
+    if (_isSettlementPopupVisible) {
+      Navigator.of(context, rootNavigator: true).pop();
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    final dineIn = context.read<DineInProvider>();
+    dineIn.clearSession();
+    if (!mounted) {
+      return;
+    }
+
+    var startedFreshSession = false;
+    try {
+      startedFreshSession = await _tryStartFreshSession(dineIn);
+    } catch (_) {
+      startedFreshSession = false;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      startedFreshSession ? '/kiosk-home' : '/kiosk-login',
+      (_) => false,
+    );
+  }
+
+  Future<void> _pollSettlementStatus() async {
+    if (!mounted || _isLoadingRounds || _isPaymentResetInProgress) {
+      return;
+    }
+
+    final dineIn = context.read<DineInProvider>();
+    final sessionId = dineIn.sessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      _stopPaymentSettlementPolling();
+      return;
+    }
+
+    try {
+      final previousHasPending = _rounds.any((round) => !round.isPaid);
+      final parsed = await _loadRoundsFromApi();
+      if (!mounted || _isPaymentResetInProgress) {
+        return;
+      }
+
+      final hasPendingNow = parsed.any((round) => !round.isPaid);
+      final justSettled =
+          previousHasPending && parsed.isNotEmpty && !hasPendingNow;
+
+      setState(() {
+        _rounds = parsed;
+        _roundsError = null;
+      });
+
+      _syncPaymentSettlementPolling(parsed);
+
+      if (justSettled) {
+        await _handleSessionSettledAndReset(
+          message: 'Thanks for dining in. Clearing your session now...',
+        );
+      }
+    } catch (_) {
+      // Keep polling to handle transient failures.
+    }
   }
 
   double get _sessionTotal {
@@ -137,6 +377,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
         _rounds = parsed;
         _isLoadingRounds = false;
       });
+      _syncPaymentSettlementPolling(parsed);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -144,23 +385,56 @@ class _MyTableScreenState extends State<MyTableScreen> {
         _roundsError = e.toString().replaceFirst('Exception: ', '');
         _rounds = <_SessionRound>[];
       });
+      _stopPaymentSettlementPolling();
     }
   }
 
   Future<void> _notifyWaiter({bool forCashPayment = false}) async {
     if (!mounted) return;
 
-    setState(() {
-      _waiterRequestState = _WaiterRequestState.notified;
-    });
+    final dineIn = context.read<DineInProvider>();
+    try {
+      final sessionId = dineIn.sessionId;
+      if (sessionId == null || sessionId.isEmpty) {
+        throw Exception('No active dine-in session found.');
+      }
 
-    final message = forCashPayment
-        ? 'Cash payment requested. Waiter has been notified!'
-        : 'Waiter has been notified!';
+      final response = await DineInService().callWaiter(
+        sessionId,
+        token: dineIn.token,
+        forCashPayment: forCashPayment,
+      );
+      if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-    );
+      final callId = response['call_id']?.toString();
+
+      _waiterAckResetTimer?.cancel();
+      setState(() {
+        _waiterRequestState = _WaiterRequestState.notified;
+        _activeWaiterCallId = callId;
+      });
+
+      if (callId != null && callId.isNotEmpty) {
+        _startWaiterPolling();
+      }
+
+      if (forCashPayment) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Cash payment requested. Waiter has been notified!'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString()),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _openOrderHistoryScreen(DateTime startedAt) async {
@@ -185,6 +459,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
         builder: (_) => _PaymentDetailsScreen(
           loadRounds: _loadRoundsFromApi,
           notifyWaiter: _notifyWaiter,
+          onSessionSettled: _handleSessionSettledAndReset,
         ),
       ),
     );
@@ -231,7 +506,25 @@ class _MyTableScreenState extends State<MyTableScreen> {
 
     if (shouldEnd != true || !mounted) return;
 
-    Provider.of<DineInProvider>(context, listen: false).clearSession();
+    final dineIn = Provider.of<DineInProvider>(context, listen: false);
+    final sessionId = dineIn.sessionId;
+
+    if (sessionId != null && sessionId.isNotEmpty) {
+      try {
+        await _dineInService.endSession(sessionId, token: dineIn.token);
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+    }
+
+    dineIn.clearSession();
     Navigator.pushNamedAndRemoveUntil(context, '/kiosk-login', (_) => false);
   }
 
@@ -383,7 +676,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         OutlinedButton(
-          onPressed: _notifyWaiter,
+          onPressed: _isPaymentResetInProgress ? null : _notifyWaiter,
           style: OutlinedButton.styleFrom(
             minimumSize: const Size.fromHeight(50),
           ),
@@ -409,7 +702,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
-                'Status will update to "Waiter has received your request and is coming at your table" once kitchen acknowledgement is connected.',
+                'Waiting for kitchen acknowledgement...',
                 style: theme.textTheme.bodySmall,
               ),
             ),
@@ -621,9 +914,23 @@ class _OrderHistoryDetailsScreenState
       return;
     }
 
+    final sessionId = context.read<DineInProvider>().sessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No active session available for tracking.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => OrderTrackingScreen(orderId: orderId)),
+      MaterialPageRoute(
+        builder: (_) =>
+            _DineInOrderTrackingScreen(sessionId: sessionId, orderId: orderId),
+      ),
     );
   }
 
@@ -824,10 +1131,12 @@ class _OrderHistoryDetailsScreenState
 class _PaymentDetailsScreen extends StatefulWidget {
   final Future<List<_SessionRound>> Function() loadRounds;
   final Future<void> Function({bool forCashPayment}) notifyWaiter;
+  final Future<void> Function({required String message}) onSessionSettled;
 
   const _PaymentDetailsScreen({
     required this.loadRounds,
     required this.notifyWaiter,
+    required this.onSessionSettled,
   });
 
   @override
@@ -849,6 +1158,13 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
 
   bool get _hasOrders {
     return _rounds.isNotEmpty;
+  }
+
+  bool get _allRoundsCompleted {
+    if (_rounds.isEmpty) {
+      return false;
+    }
+    return _rounds.every((round) => round.isCompleted);
   }
 
   @override
@@ -918,6 +1234,18 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
       return;
     }
 
+    if (!_allRoundsCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Payment can be completed only after all rounds are marked completed.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
     final dineIn = Provider.of<DineInProvider>(context, listen: false);
     if (dineIn.sessionCard == null) {
       await _openAddCardScreen();
@@ -954,14 +1282,40 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Card payment initiated. Kitchen payment acknowledgement will be connected in a future phase.',
+    final sessionId = dineIn.sessionId;
+    if (sessionId == null || sessionId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No active dine-in session found.'),
+          behavior: SnackBarBehavior.floating,
         ),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+      );
+      return;
+    }
+
+    try {
+      final response = await DineInService().settleSessionPayment(
+        sessionId,
+        'card',
+        token: dineIn.token,
+      );
+      if (!mounted) return;
+
+      final backendMessage = (response['message'] ?? '').toString().trim();
+      final popupMessage = backendMessage.isEmpty
+          ? 'Thanks for dining in. Clearing your session now...'
+          : 'Thanks for dining in.\n$backendMessage\n\nClearing your session now...';
+
+      await widget.onSessionSettled(message: popupMessage);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Future<void> _handleCashPayment() async {
@@ -969,6 +1323,18 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No pending payment available for cash request.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    if (!_allRoundsCompleted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cash request is available only after all rounds are marked completed.',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1139,10 +1505,12 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
               theme: theme,
               icon: Icons.credit_card,
               title: 'Pay by Card',
-              subtitle: card == null
+              subtitle: !_allRoundsCompleted && _hasOrders
+                  ? 'Available after all rounds are completed'
+                  : card == null
                   ? 'Add a card first, then complete payment'
                   : 'Use saved session card to proceed',
-              onTap: _hasOrders && _hasPendingPayment
+              onTap: _hasOrders && _hasPendingPayment && _allRoundsCompleted
                   ? _handleCardPayment
                   : null,
             ),
@@ -1151,8 +1519,10 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
               theme: theme,
               icon: Icons.payments,
               title: 'Pay by Cash',
-              subtitle: 'Waiter will be notified for cash collection',
-              onTap: _hasOrders && _hasPendingPayment
+              subtitle: !_allRoundsCompleted && _hasOrders
+                  ? 'Available after all rounds are completed'
+                  : 'Waiter will be notified for cash collection',
+              onTap: _hasOrders && _hasPendingPayment && _allRoundsCompleted
                   ? _handleCashPayment
                   : null,
             ),
@@ -1187,6 +1557,14 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
                   style: theme.textTheme.bodySmall,
                 ),
               ),
+            if (_hasOrders && _hasPendingPayment && !_allRoundsCompleted)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text(
+                  'Payment unlocks when all rounds are completed in kitchen.',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
             const SizedBox(height: 8),
           ],
         ),
@@ -1199,6 +1577,372 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
         actions: [
           IconButton(
             onPressed: _refreshRounds,
+            icon: const Icon(Icons.refresh),
+          ),
+        ],
+      ),
+      body: body,
+    );
+  }
+}
+
+class _DineInOrderTrackingScreen extends StatefulWidget {
+  final String sessionId;
+  final int orderId;
+
+  const _DineInOrderTrackingScreen({
+    required this.sessionId,
+    required this.orderId,
+  });
+
+  @override
+  State<_DineInOrderTrackingScreen> createState() =>
+      _DineInOrderTrackingScreenState();
+}
+
+class _DineInOrderTrackingScreenState
+    extends State<_DineInOrderTrackingScreen> {
+  final DineInService _dineInService = DineInService();
+
+  bool _loading = true;
+  String? _error;
+  String _status = 'confirmed';
+  int _estimatedPrepTimeMinutes = 15;
+  int _roundNumber = 0;
+  String? _paymentStatus;
+  DateTime? _createdAt;
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTracking(showLoader: true);
+    _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      _loadTracking(showLoader: false);
+    });
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadTracking({required bool showLoader}) async {
+    if (showLoader) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
+
+    try {
+      final token = context.read<DineInProvider>().token;
+      final data = await _dineInService.fetchSessionOrderTracking(
+        widget.sessionId,
+        widget.orderId,
+        token: token,
+      );
+
+      if (!mounted) return;
+
+      final parsedStatus = (data['status'] ?? _status).toString().toLowerCase();
+      final parsedPrep = _SessionRound._asInt(
+        data['estimated_prep_time_minutes'],
+      );
+      final parsedRound = _SessionRound._asInt(data['round_number']);
+      final parsedCreatedAt = _SessionRound._asDateTime(data['created_at']);
+
+      setState(() {
+        _status = parsedStatus;
+        _estimatedPrepTimeMinutes = parsedPrep ?? _estimatedPrepTimeMinutes;
+        _roundNumber = parsedRound ?? _roundNumber;
+        _paymentStatus = data['payment_status']?.toString();
+        _createdAt = parsedCreatedAt;
+        _error = null;
+        _loading = false;
+      });
+
+      if (_status == 'completed') {
+        _pollTimer?.cancel();
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      if (showLoader) {
+        setState(() {
+          _loading = false;
+          _error = e.toString().replaceFirst('Exception: ', '');
+        });
+      }
+    }
+  }
+
+  String _displayTime(String status, int storedMinutes) {
+    final s = status.toLowerCase();
+    final base = storedMinutes > 0 ? storedMinutes : 15;
+
+    switch (s) {
+      case 'confirmed':
+      case 'in_kitchen':
+        return '$base mins';
+      case 'preparing':
+        final left = (storedMinutes - 3).clamp(1, 99);
+        return '$left mins';
+      case 'ready':
+        final left = (base ~/ 6).clamp(1, 99);
+        return '$left min${left == 1 ? '' : 's'}';
+      case 'completed':
+        return '0 mins';
+      default:
+        return '$base mins';
+    }
+  }
+
+  double _progressForStatus(String status) {
+    final s = status.toLowerCase();
+    switch (s) {
+      case 'confirmed':
+      case 'in_kitchen':
+        return 0.15;
+      case 'preparing':
+        return 0.45;
+      case 'ready':
+        return 0.75;
+      case 'completed':
+        return 1.0;
+      default:
+        return 0.1;
+    }
+  }
+
+  bool _isDone(String currentStatus, List<String> states) {
+    return states.contains(currentStatus.toLowerCase());
+  }
+
+  bool _isCurrent(String currentStatus, List<String> states) {
+    return states.contains(currentStatus.toLowerCase());
+  }
+
+  Widget _buildStatusRow(
+    BuildContext context, {
+    required IconData icon,
+    required String title,
+    required bool done,
+    required bool inProgress,
+  }) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme;
+
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(
+        icon,
+        color: done
+            ? Colors.green
+            : inProgress
+            ? color.primary
+            : theme.hintColor,
+      ),
+      title: Text(
+        title,
+        style: theme.textTheme.bodyMedium?.copyWith(
+          fontWeight: FontWeight.w500,
+          color: done
+              ? Colors.green
+              : inProgress
+              ? color.primary
+              : theme.hintColor,
+        ),
+      ),
+      trailing: done
+          ? const Icon(Icons.check, color: Colors.green)
+          : inProgress
+          ? Text(
+              'In Progress',
+              style: theme.textTheme.bodySmall?.copyWith(color: color.primary),
+            )
+          : null,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final color = theme.colorScheme;
+
+    Widget body;
+    if (_loading) {
+      body = const Center(child: CircularProgressIndicator());
+    } else if (_error != null) {
+      body = Center(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_error!, textAlign: TextAlign.center),
+              const SizedBox(height: 10),
+              ElevatedButton.icon(
+                onPressed: () => _loadTracking(showLoader: true),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try Again'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      body = SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 20,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _roundNumber > 0
+                          ? 'Order #${widget.orderId}  |  Round $_roundNumber'
+                          : 'Order #${widget.orderId}',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (_createdAt != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        'Placed at ${_formatClockTime(_createdAt)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.hintColor,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 10),
+                    Text(
+                      'Estimated Prep Time',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.hintColor,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Icon(Icons.access_time, color: color.primary, size: 18),
+                        const SizedBox(width: 6),
+                        Text(
+                          _displayTime(_status, _estimatedPrepTimeMinutes),
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w500,
+                            color: color.primary,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    LinearProgressIndicator(
+                      value: _progressForStatus(_status),
+                      backgroundColor: color.primary.withValues(alpha: 0.2),
+                      color: color.primary,
+                      minHeight: 4,
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Status: ${_status.toUpperCase()}',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: color.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (_paymentStatus != null &&
+                        _paymentStatus!.trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6),
+                        child: Text(
+                          'Payment: ${_paymentStatus!.replaceAll('_', ' ').toUpperCase()}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 16,
+                ),
+                child: Column(
+                  children: [
+                    _buildStatusRow(
+                      context,
+                      icon: Icons.check_circle,
+                      title: 'Order Confirmed',
+                      done: _isDone(_status, [
+                        'confirmed',
+                        'in_kitchen',
+                        'preparing',
+                        'ready',
+                        'completed',
+                      ]),
+                      inProgress: _isCurrent(_status, ['confirmed']),
+                    ),
+                    _buildStatusRow(
+                      context,
+                      icon: Icons.local_fire_department,
+                      title: 'Preparing',
+                      done: _isDone(_status, [
+                        'preparing',
+                        'ready',
+                        'completed',
+                      ]),
+                      inProgress: _isCurrent(_status, [
+                        'in_kitchen',
+                        'preparing',
+                      ]),
+                    ),
+                    _buildStatusRow(
+                      context,
+                      icon: Icons.restaurant,
+                      title: 'Ready',
+                      done: _isDone(_status, ['ready', 'completed']),
+                      inProgress: _isCurrent(_status, ['ready']),
+                    ),
+                    _buildStatusRow(
+                      context,
+                      icon: Icons.verified,
+                      title: 'Completed',
+                      done: _isDone(_status, ['completed']),
+                      inProgress: false,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Track Order'),
+        actions: [
+          IconButton(
+            onPressed: () => _loadTracking(showLoader: true),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -1682,6 +2426,7 @@ class _SessionRound {
   final int roundNumber;
   final DateTime? createdAt;
   final double roundTotal;
+  final String kitchenStatus;
   final bool isPaid;
   final List<_RoundItem> items;
 
@@ -1690,6 +2435,7 @@ class _SessionRound {
     required this.roundNumber,
     required this.createdAt,
     required this.roundTotal,
+    required this.kitchenStatus,
     required this.isPaid,
     required this.items,
   });
@@ -1717,6 +2463,11 @@ class _SessionRound {
         _asDouble(data['amount']) ??
         computedTotal;
 
+    final parsedKitchenStatus = (data['kitchen_status'] ?? data['status'] ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+
     return _SessionRound(
       orderId: _asInt(data['order_id'] ?? data['id']),
       roundNumber: _asInt(data['round_number']) ?? (index + 1),
@@ -1724,9 +2475,14 @@ class _SessionRound {
         data['created_at'] ?? data['ordered_at'] ?? data['time'],
       ),
       roundTotal: rawTotal,
+      kitchenStatus: parsedKitchenStatus,
       isPaid: _isRoundPaid(data),
       items: parsedItems,
     );
+  }
+
+  bool get isCompleted {
+    return kitchenStatus == 'completed' || kitchenStatus == 'served';
   }
 
   static bool _isRoundPaid(Map<String, dynamic> data) {

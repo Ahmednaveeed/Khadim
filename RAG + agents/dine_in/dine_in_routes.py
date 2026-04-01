@@ -1,13 +1,37 @@
 import asyncio
-from typing import Literal
-from uuid import UUID
+from datetime import datetime
+from typing import Generator, Literal
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, text
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 from agents.recommender_agent import RecommendationEngine
 from infrastructure.db import SQL_ENGINE
+from orders.orders_service import _create_kitchen_tasks
+
+Base = declarative_base()
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=SQL_ENGINE)
+
+
+def get_db() -> Generator[Session, None, None]:
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+class WaiterCall(Base):
+    __tablename__ = "waiter_calls"
+
+    call_id = Column(PGUUID(as_uuid=True), primary_key=True, default=uuid4)
+    table_id = Column(PGUUID(as_uuid=True), ForeignKey("restaurant_tables.table_id"))
+    called_at = Column(DateTime, default=datetime.utcnow)
+    resolved = Column(Boolean, default=False)
 
 router = APIRouter(prefix="/dine-in", tags=["dine-in"])
 recommendation_engine = RecommendationEngine()
@@ -38,6 +62,43 @@ class DineInRecommendationSeedItem(BaseModel):
 class DineInRecommendationsRequest(BaseModel):
     session_id: UUID
     items: list[DineInRecommendationSeedItem]
+
+
+class DineInSessionSettlementRequest(BaseModel):
+    payment_method: Literal["card", "cash"]
+
+
+def _count_incomplete_orders_for_session(executor, session_id: UUID) -> int:
+    row = executor.execute(
+        text(
+            """
+            SELECT COUNT(*) AS incomplete_orders
+            FROM (
+                SELECT
+                    o.order_id,
+                    CASE
+                        WHEN COUNT(kt.task_id) = 0 THEN
+                            LOWER(COALESCE(o.status, '')) IN ('completed', 'served')
+                        ELSE
+                            BOOL_AND(kt.status = 'COMPLETED')
+                    END AS is_completed
+                FROM public.orders o
+                LEFT JOIN public.kitchen_tasks kt
+                    ON kt.order_id = o.order_id
+                WHERE o.session_id = :session_id
+                  AND COALESCE(o.order_type, 'delivery') = 'dine_in'
+                GROUP BY o.order_id, o.status
+            ) completion
+            WHERE completion.is_completed = FALSE
+            """
+        ),
+        {"session_id": session_id},
+    ).mappings().fetchone()
+
+    if not row:
+        return 0
+
+    return int(row["incomplete_orders"] or 0)
 
 
 @router.get("/top-sellers")
@@ -347,7 +408,7 @@ def create_dine_in_order(payload: DineInOrderRequest):
         session_row = conn.execute(
             text(
                 """
-                SELECT session_id, COALESCE(round_count, 0) AS round_count
+                                SELECT session_id, table_id, COALESCE(round_count, 0) AS round_count
                 FROM public.dine_in_sessions
                 WHERE session_id = :session_id
                   AND status = 'active'
@@ -444,6 +505,7 @@ def create_dine_in_order(payload: DineInOrderRequest):
                     tax,
                     delivery_fee,
                     order_type,
+                    table_id,
                     session_id,
                     status,
                     estimated_prep_time_minutes,
@@ -457,6 +519,7 @@ def create_dine_in_order(payload: DineInOrderRequest):
                     :tax,
                     :delivery_fee,
                     'dine_in',
+                    :table_id,
                     :session_id,
                     'confirmed',
                     15,
@@ -472,6 +535,7 @@ def create_dine_in_order(payload: DineInOrderRequest):
                 "subtotal": subtotal,
                 "tax": tax,
                 "delivery_fee": delivery_fee,
+                "table_id": session_row["table_id"],
                 "session_id": payload.session_id,
                 "round_number": next_round_number,
             },
@@ -532,6 +596,36 @@ def create_dine_in_order(payload: DineInOrderRequest):
                 },
             )
 
+        # Mirror delivery flow: generate kitchen_tasks for every dine-in order item
+        # so kitchen dashboard and prep workflow can track this order.
+        kitchen_cart_items = [
+            {
+                "item_type": item["item_type"],
+                "item_id": int(item["item_id"]),
+                "quantity": int(item["quantity"]),
+            }
+            for item in normalized_items
+        ]
+        estimated_prep_minutes = _create_kitchen_tasks(
+            conn,
+            order_id,
+            kitchen_cart_items,
+        )
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.orders
+                SET estimated_prep_time_minutes = :estimated_prep_time_minutes
+                WHERE order_id = :order_id
+                """
+            ),
+            {
+                "estimated_prep_time_minutes": int(estimated_prep_minutes or 0),
+                "order_id": order_id,
+            },
+        )
+
         conn.execute(
             text(
                 """
@@ -581,8 +675,30 @@ def get_session_orders(session_id: UUID):
                     o.created_at,
                     o.total_price,
                     o.status,
-                    o.payment_status
+                    o.payment_status,
+                    o.estimated_prep_time_minutes,
+                    CASE
+                        WHEN kt.task_count IS NULL OR kt.task_count = 0
+                            THEN COALESCE(o.status, 'confirmed')
+                        WHEN kt.completed_count = kt.task_count
+                            THEN 'completed'
+                        WHEN kt.ready_or_completed_count = kt.task_count
+                            THEN 'ready'
+                        WHEN kt.in_progress_count > 0
+                            THEN 'preparing'
+                        ELSE 'in_kitchen'
+                    END AS kitchen_status
                 FROM public.orders o
+                LEFT JOIN (
+                    SELECT
+                        order_id,
+                        COUNT(*) AS task_count,
+                        SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_count,
+                        SUM(CASE WHEN status IN ('READY', 'COMPLETED') THEN 1 ELSE 0 END) AS ready_or_completed_count,
+                        SUM(CASE WHEN status = 'IN_PROGRESS' THEN 1 ELSE 0 END) AS in_progress_count
+                    FROM public.kitchen_tasks
+                    GROUP BY order_id
+                ) kt ON kt.order_id = o.order_id
                 WHERE o.session_id = :session_id
                   AND COALESCE(o.order_type, 'delivery') = 'dine_in'
                 ORDER BY o.created_at ASC, o.order_id ASC
@@ -635,10 +751,11 @@ def get_session_orders(session_id: UUID):
 
         payment_status = (row["payment_status"] or "").strip().lower()
         status = (row["status"] or "").strip().lower()
+        # Settlement is independent from kitchen completion.
+        # A round is paid only when payment is explicitly settled.
         is_paid = payment_status in {"paid", "settled"} or status in {
             "paid",
             "settled",
-            "completed",
         }
 
         orders.append(
@@ -650,8 +767,12 @@ def get_session_orders(session_id: UUID):
                 if row["created_at"]
                 else None,
                 "status": row["status"],
+                "kitchen_status": row["kitchen_status"],
                 "payment_status": row["payment_status"],
                 "is_paid": is_paid,
+                "estimated_prep_time_minutes": int(
+                    row["estimated_prep_time_minutes"] or 0
+                ),
                 "round_total": order_total,
                 "items": items_by_order.get(int(row["order_id"]), []),
             }
@@ -663,6 +784,385 @@ def get_session_orders(session_id: UUID):
         "session_status": session_row["status"],
         "session_total": session_total,
         "orders": orders,
+    }
+
+
+@router.post("/sessions/{session_id}/call-waiter")
+def call_waiter(session_id: UUID, for_cash_payment: bool = False):
+    with SQL_ENGINE.begin() as conn:
+        session = conn.execute(
+            text(
+                """
+                SELECT table_id
+                FROM public.dine_in_sessions
+                WHERE session_id = :session_id
+                  AND status = 'active'
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchone()
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        if for_cash_payment:
+            incomplete_orders = _count_incomplete_orders_for_session(conn, session_id)
+            if incomplete_orders > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Payment can be requested only after all rounds are completed.",
+                )
+
+            conn.execute(
+                text(
+                    """
+                    UPDATE public.restaurant_tables
+                    SET status = 'bill_requested_cash'
+                    WHERE table_id = :table_id
+                    """
+                ),
+                {"table_id": session["table_id"]},
+            )
+
+        waiter_call_row = conn.execute(
+            text(
+                """
+                INSERT INTO public.waiter_calls (table_id)
+                VALUES (:table_id)
+                RETURNING call_id, called_at
+                """
+            ),
+            {"table_id": session["table_id"]},
+        ).mappings().fetchone()
+
+    if waiter_call_row is None:
+        raise HTTPException(status_code=500, detail="Failed to create waiter call")
+
+    payload = {
+        "call_id": str(waiter_call_row["call_id"]),
+        "called_at": waiter_call_row["called_at"].isoformat()
+        if waiter_call_row["called_at"]
+        else None,
+    }
+
+    if for_cash_payment:
+        return {
+            "message": "Cash bill requested. Waiter notified",
+            **payload,
+        }
+
+    return {"message": "Waiter notified", **payload}
+
+
+@router.get("/sessions/{session_id}/waiter-calls/{call_id}/status")
+def get_waiter_call_status(session_id: UUID, call_id: UUID):
+    with SQL_ENGINE.begin() as conn:
+        call_row = conn.execute(
+            text(
+                """
+                SELECT
+                    wc.call_id,
+                    wc.called_at,
+                    wc.resolved,
+                    wc.table_id
+                FROM public.waiter_calls wc
+                WHERE wc.call_id = :call_id
+                LIMIT 1
+                """
+            ),
+            {"call_id": call_id},
+        ).mappings().fetchone()
+
+        if not call_row:
+            raise HTTPException(status_code=404, detail="Waiter call not found")
+
+        session_row = conn.execute(
+            text(
+                """
+                SELECT table_id
+                FROM public.dine_in_sessions
+                WHERE session_id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchone()
+
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        if str(session_row["table_id"]) != str(call_row["table_id"]):
+            raise HTTPException(status_code=403, detail="Waiter call does not belong to this session")
+
+    return {
+        "call_id": str(call_row["call_id"]),
+        "resolved": bool(call_row["resolved"]),
+        "status": "acknowledged" if call_row["resolved"] else "notified",
+        "called_at": call_row["called_at"].isoformat() if call_row["called_at"] else None,
+    }
+
+
+@router.post("/sessions/{session_id}/end")
+def end_dine_in_session(session_id: UUID):
+    with SQL_ENGINE.begin() as conn:
+        session_row = conn.execute(
+            text(
+                """
+                SELECT session_id, table_id, status
+                FROM public.dine_in_sessions
+                WHERE session_id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchone()
+
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        pending_payment_row = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) AS pending_count
+                FROM public.orders
+                WHERE session_id = :session_id
+                  AND COALESCE(order_type, 'delivery') = 'dine_in'
+                  AND LOWER(COALESCE(payment_status, '')) NOT IN ('paid', 'settled')
+                  AND LOWER(COALESCE(status, '')) NOT IN ('paid', 'settled')
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchone()
+
+        if int(pending_payment_row["pending_count"] or 0) > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot end session with pending payment.",
+            )
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.dine_in_sessions
+                SET status = 'closed',
+                    ended_at = COALESCE(ended_at, NOW())
+                WHERE session_id = :session_id
+                """
+            ),
+            {"session_id": session_id},
+        )
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.restaurant_tables
+                SET status = 'available'
+                WHERE table_id = :table_id
+                """
+            ),
+            {"table_id": session_row["table_id"]},
+        )
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.waiter_calls
+                SET resolved = true
+                WHERE table_id = :table_id
+                  AND resolved = false
+                """
+            ),
+            {"table_id": session_row["table_id"]},
+        )
+
+    return {
+        "session_id": str(session_id),
+        "message": "Session ended successfully.",
+    }
+
+
+@router.post("/sessions/{session_id}/settle-payment")
+def settle_session_payment(session_id: UUID, payload: DineInSessionSettlementRequest):
+    with SQL_ENGINE.begin() as conn:
+        session_row = conn.execute(
+            text(
+                """
+                SELECT session_id, table_id, status
+                FROM public.dine_in_sessions
+                WHERE session_id = :session_id
+                LIMIT 1
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchone()
+
+        if not session_row:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        order_count_row = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) AS total_orders
+                FROM public.orders
+                WHERE session_id = :session_id
+                  AND COALESCE(order_type, 'delivery') = 'dine_in'
+                """
+            ),
+            {"session_id": session_id},
+        ).mappings().fetchone()
+
+        total_orders = int(order_count_row["total_orders"] or 0)
+        if total_orders <= 0:
+            raise HTTPException(status_code=400, detail="No dine-in orders found for this session")
+
+        incomplete_orders = _count_incomplete_orders_for_session(conn, session_id)
+        if incomplete_orders > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Payment can be completed only after all rounds are marked completed in kitchen.",
+            )
+
+        if payload.payment_method == "cash":
+            conn.execute(
+                text(
+                    """
+                    UPDATE public.restaurant_tables
+                    SET status = 'bill_requested_cash'
+                    WHERE table_id = :table_id
+                    """
+                ),
+                {"table_id": session_row["table_id"]},
+            )
+
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO public.waiter_calls (table_id)
+                    VALUES (:table_id)
+                    """
+                ),
+                {"table_id": session_row["table_id"]},
+            )
+
+            return {
+                "session_id": str(session_id),
+                "payment_method": "cash",
+                "message": "Cash bill requested. Waiter notified",
+            }
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.orders
+                SET payment_status = 'paid'
+                WHERE session_id = :session_id
+                  AND COALESCE(order_type, 'delivery') = 'dine_in'
+                """
+            ),
+            {"session_id": session_id},
+        )
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.waiter_calls
+                SET resolved = true
+                WHERE table_id = :table_id
+                  AND resolved = false
+                """
+            ),
+            {"table_id": session_row["table_id"]},
+        )
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.dine_in_sessions
+                SET status = 'closed',
+                    ended_at = NOW(),
+                    payment_method = 'card'
+                WHERE session_id = :session_id
+                """
+            ),
+            {"session_id": session_id},
+        )
+
+        conn.execute(
+            text(
+                """
+                UPDATE public.restaurant_tables
+                SET status = 'available'
+                WHERE table_id = :table_id
+                """
+            ),
+            {"table_id": session_row["table_id"]},
+        )
+
+    return {
+        "session_id": str(session_id),
+        "payment_method": "card",
+        "message": "Card payment successful. Session settled and table is now available.",
+    }
+
+
+@router.get("/sessions/{session_id}/orders/{order_id}/tracking")
+def get_dine_in_order_tracking(session_id: UUID, order_id: int):
+    with SQL_ENGINE.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT
+                    o.order_id,
+                    o.session_id,
+                    o.round_number,
+                    CASE
+                        WHEN kt.task_count IS NULL OR kt.task_count = 0
+                            THEN COALESCE(o.status, 'confirmed')
+                        ELSE kt.tracking_status
+                    END AS status,
+                    o.payment_status,
+                    COALESCE(
+                        kt.max_estimated_minutes,
+                        o.estimated_prep_time_minutes,
+                        0
+                    ) AS estimated_prep_time_minutes,
+                    o.created_at
+                FROM public.orders o
+                LEFT JOIN (
+                    SELECT
+                        order_id,
+                        COUNT(*) AS task_count,
+                        MAX(estimated_minutes) AS max_estimated_minutes,
+                        CASE
+                            WHEN BOOL_AND(status = 'COMPLETED') THEN 'completed'
+                            WHEN BOOL_AND(status IN ('READY', 'COMPLETED')) THEN 'ready'
+                            WHEN BOOL_OR(status = 'IN_PROGRESS') THEN 'preparing'
+                            ELSE 'in_kitchen'
+                        END AS tracking_status
+                    FROM public.kitchen_tasks
+                    GROUP BY order_id
+                ) kt ON kt.order_id = o.order_id
+                WHERE o.order_id = :order_id
+                  AND o.session_id = :session_id
+                  AND COALESCE(o.order_type, 'delivery') = 'dine_in'
+                LIMIT 1
+                """
+            ),
+            {"order_id": order_id, "session_id": session_id},
+        ).mappings().fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Dine-in order not found")
+
+    return {
+        "order_id": int(row["order_id"]),
+        "session_id": str(row["session_id"]),
+        "round_number": int(row["round_number"] or 0),
+        "status": row["status"],
+        "payment_status": row["payment_status"],
+        "estimated_prep_time_minutes": int(row["estimated_prep_time_minutes"] or 0),
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
     }
 
 

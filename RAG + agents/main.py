@@ -639,12 +639,18 @@ def kitchen_get_orders():
             cur.execute("""
                 SELECT kt.task_id, kt.order_id, kt.item_name, kt.qty, kt.station,
                        kt.assigned_chef, kt.estimated_minutes, kt.status,
+                       COALESCE(o.order_type, 'delivery') AS order_type,
+                       o.round_number,
+                       rt.table_number,
+                       ds.session_id,
                        COALESCE(NULLIF(u.full_name,''), NULLIF(u.email,''), NULLIF(u.phone,''), 'Unknown') AS customer_name,
                        u.user_id AS customer_id
                 FROM kitchen_tasks kt
                 LEFT JOIN orders o ON o.order_id = kt.order_id
                 LEFT JOIN cart c ON c.cart_id = o.cart_id
                 LEFT JOIN auth.app_users u ON u.user_id = c.user_id
+                LEFT JOIN public.dine_in_sessions ds ON ds.session_id = o.session_id
+                LEFT JOIN public.restaurant_tables rt ON rt.table_id = COALESCE(o.table_id, ds.table_id)
                 WHERE kt.status IN ('QUEUED', 'IN_PROGRESS', 'READY')
                 ORDER BY kt.order_id, kt.task_id
             """)
@@ -660,6 +666,10 @@ def kitchen_get_orders():
                 "order_id": oid,
                 "tasks": [],
                 "overall_status": "READY",
+                "order_type": row.get("order_type") or "delivery",
+                "round_number": row.get("round_number"),
+                "table_number": row.get("table_number"),
+                "session_id": str(row["session_id"]) if row.get("session_id") else None,
                 "customer_name": row["customer_name"],
                 "customer_id": str(row["customer_id"]) if row["customer_id"] else "",
             }
@@ -668,6 +678,173 @@ def kitchen_get_orders():
             orders[oid]["overall_status"] = row["status"]
 
     return {"orders": list(orders.values())}
+
+
+@app.get("/kitchen/tables")
+def kitchen_get_tables():
+    """Return current table states with active session snapshot."""
+    db = DatabaseConnection.get_instance()
+    import psycopg2.extras
+    with db.get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT rt.table_id, rt.table_number, rt.status,
+                       ds.session_id, ds.started_at, ds.total_amount,
+                       ds.round_count
+                FROM public.restaurant_tables rt
+                LEFT JOIN public.dine_in_sessions ds
+                    ON rt.table_id = ds.table_id
+                    AND ds.status NOT IN ('closed')
+                ORDER BY rt.table_number
+                """
+            )
+            rows = cur.fetchall()
+
+    tables = []
+    for row in rows:
+        tables.append(
+            {
+                "table_id": str(row["table_id"]),
+                "table_number": row["table_number"],
+                "status": row["status"],
+                "session_id": str(row["session_id"]) if row.get("session_id") else None,
+                "started_at": row["started_at"].isoformat() if row.get("started_at") else None,
+                "total_amount": float(row["total_amount"] or 0),
+                "round_count": int(row["round_count"] or 0),
+            }
+        )
+    return {"tables": tables}
+
+
+@app.get("/kitchen/waiter-calls")
+def kitchen_get_waiter_calls():
+    """Return unresolved waiter calls oldest first."""
+    db = DatabaseConnection.get_instance()
+    import psycopg2.extras
+    with db.get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT wc.call_id, wc.table_id, wc.called_at, wc.resolved,
+                       rt.table_number
+                FROM public.waiter_calls wc
+                JOIN public.restaurant_tables rt ON wc.table_id = rt.table_id
+                WHERE wc.resolved = false
+                ORDER BY wc.called_at ASC
+                """
+            )
+            rows = cur.fetchall()
+
+    calls = []
+    for row in rows:
+        calls.append(
+            {
+                "call_id": str(row["call_id"]),
+                "table_id": str(row["table_id"]),
+                "table_number": row["table_number"],
+                "called_at": row["called_at"].isoformat() if row.get("called_at") else None,
+                "resolved": bool(row.get("resolved")),
+            }
+        )
+    return {"calls": calls}
+
+
+@app.post("/kitchen/sessions/{session_id}/confirm-cash")
+def kitchen_confirm_cash_payment(session_id: str):
+    """Mark dine-in session paid by cash and move table to cleaning."""
+    db = DatabaseConnection.get_instance()
+    import psycopg2.extras
+    with db.get_connection() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE public.orders
+                SET payment_status = 'paid'
+                WHERE session_id = %s
+                """,
+                (session_id,),
+            )
+            cur.execute(
+                """
+                UPDATE public.dine_in_sessions
+                SET status = 'closed', ended_at = NOW(),
+                    payment_method = 'cash'
+                WHERE session_id = %s
+                RETURNING table_id
+                """,
+                (session_id,),
+            )
+            session_row = cur.fetchone()
+            if not session_row:
+                raise HTTPException(status_code=404, detail="Session not found")
+
+            cur.execute(
+                """
+                UPDATE public.restaurant_tables
+                SET status = 'available'
+                WHERE table_id = %s
+                """,
+                (session_row["table_id"],),
+            )
+            cur.execute(
+                """
+                UPDATE public.waiter_calls
+                SET resolved = true
+                WHERE table_id = %s
+                  AND resolved = false
+                """,
+                (session_row["table_id"],),
+            )
+        conn.commit()
+
+    return {
+        "success": True,
+        "message": "Cash confirmed. Table is now available.",
+        "session_id": session_id,
+    }
+
+
+@app.post("/kitchen/tables/{table_id}/mark-ready")
+def kitchen_mark_table_ready(table_id: str):
+    """Mark a cleaning table as available."""
+    db = DatabaseConnection.get_instance()
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE public.restaurant_tables
+                SET status = 'available'
+                WHERE table_id = %s
+                """,
+                (table_id,),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Table not found")
+        conn.commit()
+
+    return {"success": True, "message": "Table is now available", "table_id": table_id}
+
+
+@app.post("/kitchen/waiter-calls/{call_id}/resolve")
+def kitchen_resolve_waiter_call(call_id: str):
+    """Resolve an active waiter call."""
+    db = DatabaseConnection.get_instance()
+    with db.get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE public.waiter_calls
+                SET resolved = true
+                WHERE call_id = %s
+                """,
+                (call_id,),
+            )
+            if cur.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Waiter call not found")
+        conn.commit()
+
+    return {"success": True, "message": "Waiter call resolved", "call_id": call_id}
 
 
 class KitchenStatusUpdate(BaseModel):
