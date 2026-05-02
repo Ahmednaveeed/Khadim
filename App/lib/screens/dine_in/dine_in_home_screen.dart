@@ -7,6 +7,7 @@ import 'package:khaadim/screens/discover/custom_deal_screen.dart';
 import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
 import 'package:khaadim/screens/dine_in/my_table_screen.dart';
 import 'package:khaadim/services/api_config.dart';
+import 'package:khaadim/services/dine_in_service.dart';
 import 'package:khaadim/utils/ImageResolver.dart';
 import 'package:khaadim/widgets/mic_button.dart';
 import 'package:khaadim/widgets/voice_nav_callbacks.dart';
@@ -51,19 +52,88 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
       default:
         route = '/kiosk-home';
     }
-    Navigator.pushNamed(context, route);
+    _navigateToRoute(route);
+  }
+
+  /// Push a kiosk route. If the user is already on the target screen we
+  /// replace instead of stacking — voice-driven filter navigation would
+  /// otherwise leave stale copies of the deal/menu page underneath.
+  void _navigateToRoute(String target, {Object? arguments}) {
+    if (!mounted) return;
+    final currentRoute = ModalRoute.of(context)?.settings.name;
+    if (currentRoute == target) {
+      Navigator.pushReplacementNamed(
+        context,
+        target,
+        arguments: arguments,
+      );
+    } else {
+      Navigator.pushNamed(context, target, arguments: arguments);
+    }
+  }
+
+  Map<String, dynamic>? _buildMenuArgs({
+    String? cuisine,
+    String? category,
+  }) {
+    final args = <String, dynamic>{};
+    if (cuisine != null && cuisine.trim().isNotEmpty) {
+      args['cuisine'] = cuisine.trim();
+    }
+    if (category != null && category.trim().isNotEmpty) {
+      args['category'] = category.trim();
+    }
+    return args.isEmpty ? null : args;
+  }
+
+  Map<String, dynamic>? _buildDealsArgs({
+    String? cuisine,
+    String? serving,
+    int? highlightDealId,
+  }) {
+    final args = <String, dynamic>{};
+    if (cuisine != null && cuisine.trim().isNotEmpty) {
+      args['cuisine'] = cuisine.trim();
+    }
+    if (serving != null && serving.trim().isNotEmpty) {
+      args['serving'] = serving.trim();
+    }
+    if (highlightDealId != null && highlightDealId > 0) {
+      args['highlight_deal_id'] = highlightDealId;
+    }
+    return args.isEmpty ? null : args;
   }
 
   @override
   void initState() {
     super.initState();
     _voiceHandler = VoiceOrderHandler();
-    _voiceHandler.init();
+    _voiceHandler.init().then((_) {
+      // Wire DineInProvider.addItem as the voice cart callback.
+      // This fixes the Kiosk voice pipeline: CartProvider.cartId is always
+      // null in Kiosk (no user login), so the old code always returned
+      // 'item_not_found'. Now voice-added items go into the dine-in order.
+      if (mounted) {
+        final dineIn = context.read<DineInProvider>();
+        _voiceHandler.setDineInAddItemCallback(
+          (itemId, itemType, itemName, price, qty) async {
+            dineIn.addItem(itemId, itemType, itemName, price, qty);
+            return true;
+          },
+        );
+      }
+    });
     _voiceHandler.setNavCallbacks(
       VoiceNavCallbacks(
         switchTab: _navigateKioskTab,
         openMenuWithFilter: ({String? cuisine, String? category}) {
-          Navigator.pushNamed(context, '/kiosk-menu');
+          _navigateToRoute(
+            '/kiosk-menu',
+            arguments: _buildMenuArgs(
+              cuisine: cuisine,
+              category: category,
+            ),
+          );
         },
         openCart: () {
           Navigator.pushNamed(context, '/kiosk-cart');
@@ -85,7 +155,14 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
           String? servingFilter,
           int? highlightDealId,
         }) {
-          Navigator.pushNamed(context, '/kiosk-deals');
+          _navigateToRoute(
+            '/kiosk-deals',
+            arguments: _buildDealsArgs(
+              cuisine: cuisineFilter,
+              serving: servingFilter,
+              highlightDealId: highlightDealId,
+            ),
+          );
         },
       ),
     );
@@ -486,14 +563,28 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
     );
   }
 
+  String _resolveDisplayTableNumber(DineInProvider dineIn) {
+    final t = dineIn.tableNumber?.trim();
+    if (t != null && t.isNotEmpty) return t;
+    final c = dineIn.cachedTableNumber?.trim();
+    if (c != null && c.isNotEmpty) return c;
+    return '--';
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final tableNumber =
-        Provider.of<DineInProvider>(context).tableNumber?.trim().isNotEmpty ==
-                true
-            ? Provider.of<DineInProvider>(context).tableNumber!.trim()
-            : '--';
+    final dineIn = Provider.of<DineInProvider>(context);
+    final tableNumber = _resolveDisplayTableNumber(dineIn);
+
+    // Keep the voice session ID in sync with the real dine-in session.
+    if (dineIn.sessionId != null && dineIn.sessionId!.isNotEmpty) {
+      _voiceHandler.updateSessionId(dineIn.sessionId!);
+    }
+
+    if (dineIn.sessionId == null) {
+      return _buildRestingScreen(context, theme, tableNumber, dineIn);
+    }
 
     return SafeArea(
       child: Scaffold(
@@ -949,6 +1040,138 @@ class _DineInHomeScreenState extends State<DineInHomeScreen> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRestingScreen(
+    BuildContext context,
+    ThemeData theme,
+    String tableNumber,
+    DineInProvider dineIn,
+  ) {
+    return SafeArea(
+      child: Scaffold(
+        backgroundColor: theme.colorScheme.surface,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.restaurant_outlined,
+                  size: 80,
+                  color: theme.colorScheme.primary.withValues(alpha: 0.5),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'Table $tableNumber is securely locked.',
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Tap below when you are ready to explore the menu and start your dining session.',
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    color: theme.hintColor,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 48),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      final service = DineInService();
+                      try {
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (_) => const Center(
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
+
+                        final ok =
+                            await dineIn.loginOrStartSessionFromCache(service);
+
+                        if (!mounted) return;
+                        Navigator.pop(context);
+
+                        if (!ok) {
+                          await dineIn.ensureTableCredentialsFromStorage();
+                          if (!mounted) return;
+                          final hasPin = dineIn.hasCachedTableCredentials;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                hasPin
+                                    ? 'Could not start session. The table may still be busy on the server — ask staff to mark it free, then try again.'
+                                    : 'This kiosk has no saved table PIN. Enter your table number and PIN below.',
+                              ),
+                              behavior: SnackBarBehavior.floating,
+                              action: SnackBarAction(
+                                label: 'Enter PIN',
+                                onPressed: () {
+                                  Navigator.pushReplacementNamed(
+                                    context,
+                                    '/kiosk-login',
+                                  );
+                                },
+                              ),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (!mounted) return;
+                        Navigator.of(context, rootNavigator: true).pop();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              e.toString().replaceFirst('Exception: ', ''),
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 18),
+                      backgroundColor: theme.colorScheme.primary,
+                      foregroundColor: theme.colorScheme.onPrimary,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      elevation: 4,
+                    ),
+                    child: Text(
+                      'START SESSION',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.onPrimary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextButton(
+                  onPressed: () {
+                    Navigator.pushReplacementNamed(context, '/kiosk-login');
+                  },
+                  child: Text(
+                    'Enter table number & PIN',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      decoration: TextDecoration.underline,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

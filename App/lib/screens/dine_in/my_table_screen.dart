@@ -6,9 +6,8 @@ import 'package:khaadim/app_config.dart';
 import 'package:khaadim/providers/dine_in_provider.dart';
 import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
 import 'package:khaadim/services/dine_in_service.dart';
+import 'package:khaadim/widgets/kiosk_voice_fab.dart';
 import 'package:provider/provider.dart';
-
-enum _WaiterRequestState { idle, notified, acknowledged }
 
 String _formatClockTime(DateTime? time) {
   if (time == null) {
@@ -65,16 +64,18 @@ class _MyTableScreenState extends State<MyTableScreen> {
   bool _isLoadingRounds = true;
   String? _roundsError;
   List<_SessionRound> _rounds = <_SessionRound>[];
-  _WaiterRequestState _waiterRequestState = _WaiterRequestState.idle;
-  String? _activeWaiterCallId;
 
   Timer? _durationTicker;
-  Timer? _waiterStatusPoller;
-  Timer? _waiterAckResetTimer;
   Timer? _paymentSettlementPoller;
 
   bool _isPaymentResetInProgress = false;
   bool _isSettlementPopupVisible = false;
+
+  // Set once when the screen opens with an auto-payment intent (voice-driven)
+  // so we can trigger the matching payment flow after rounds load without
+  // re-firing on rebuilds.
+  String? _pendingAutoPaymentMethod;
+  bool _autoPaymentTriggered = false;
 
   @override
   void initState() {
@@ -86,78 +87,57 @@ class _MyTableScreenState extends State<MyTableScreen> {
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _consumeRouteArguments();
       _fetchRounds();
     });
+  }
+
+  void _consumeRouteArguments() {
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args is Map) {
+      final method = (args['auto_payment'] ?? '').toString().trim().toLowerCase();
+      if (method == 'card' || method == 'cash') {
+        _pendingAutoPaymentMethod = method;
+      }
+    }
+  }
+
+  Future<void> _maybeAutoOpenPaymentFlow() async {
+    if (_autoPaymentTriggered) return;
+    final method = _pendingAutoPaymentMethod;
+    if (method == null) return;
+
+    // Guard: only auto-open when there's something to pay for. If not, speak
+    // nothing extra — the voice service already spoke the eligibility reason.
+    if (_isLoadingRounds || _roundsError != null) return;
+    if (_rounds.isEmpty || !_hasPendingPayment) return;
+
+    _autoPaymentTriggered = true;
+    _pendingAutoPaymentMethod = null;
+
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _PaymentDetailsScreen(
+          loadRounds: _loadRoundsFromApi,
+          notifyWaiter: _notifyWaiter,
+          onSessionSettled: _handleSessionSettledAndReset,
+          autoPaymentMethod: method,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    await _fetchRounds();
   }
 
   @override
   void dispose() {
     _durationTicker?.cancel();
-    _waiterStatusPoller?.cancel();
-    _waiterAckResetTimer?.cancel();
     _paymentSettlementPoller?.cancel();
     super.dispose();
-  }
-
-  void _stopWaiterPolling() {
-    _waiterStatusPoller?.cancel();
-    _waiterStatusPoller = null;
-  }
-
-  void _scheduleWaiterAckReset() {
-    _waiterAckResetTimer?.cancel();
-    _waiterAckResetTimer = Timer(const Duration(seconds: 5), () {
-      if (!mounted) return;
-      setState(() {
-        _waiterRequestState = _WaiterRequestState.idle;
-        _activeWaiterCallId = null;
-      });
-    });
-  }
-
-  Future<void> _pollWaiterCallStatus() async {
-    final callId = _activeWaiterCallId;
-    if (callId == null || callId.isEmpty || !mounted) {
-      return;
-    }
-
-    final dineIn = context.read<DineInProvider>();
-    final sessionId = dineIn.sessionId;
-    if (sessionId == null || sessionId.isEmpty) {
-      _stopWaiterPolling();
-      return;
-    }
-
-    try {
-      final statusData = await _dineInService.fetchWaiterCallStatus(
-        sessionId,
-        callId,
-        token: dineIn.token,
-      );
-
-      if (!mounted) return;
-      final isResolved = statusData['resolved'] == true;
-      if (!isResolved ||
-          _waiterRequestState == _WaiterRequestState.acknowledged) {
-        return;
-      }
-
-      _stopWaiterPolling();
-      setState(() {
-        _waiterRequestState = _WaiterRequestState.acknowledged;
-      });
-
-      _scheduleWaiterAckReset();
-    } catch (_) {
-      // Ignore transient polling errors and keep retrying.
-    }
-  }
-
-  void _startWaiterPolling() {
-    _stopWaiterPolling();
-    _waiterStatusPoller = Timer.periodic(const Duration(seconds: 2), (_) {
-      _pollWaiterCallStatus();
-    });
   }
 
   void _startPaymentSettlementPolling() {
@@ -186,45 +166,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
   }
 
   Future<bool> _tryStartFreshSession(DineInProvider dineIn) async {
-    final cachedTableNumber = dineIn.cachedTableNumber;
-    final cachedTablePin = dineIn.cachedTablePin;
-
-    if (cachedTableNumber == null ||
-        cachedTableNumber.trim().isEmpty ||
-        cachedTablePin == null ||
-        cachedTablePin.trim().isEmpty) {
-      return false;
-    }
-
-    final loginResult = await _dineInService.tableLogin(
-      cachedTableNumber.trim(),
-      cachedTablePin.trim(),
-    );
-
-    final sessionId = (loginResult['session_id'] ?? '').toString();
-    final tableId = (loginResult['table_id'] ?? '').toString();
-    final resolvedTableNumber =
-        (loginResult['table_number'] ?? cachedTableNumber).toString();
-    final token = (loginResult['token'] ?? loginResult['access_token'] ?? '')
-        .toString();
-    final startedAtRaw = (loginResult['started_at'] ?? '').toString();
-    final startedAt = startedAtRaw.isEmpty
-        ? null
-        : DateTime.tryParse(startedAtRaw);
-
-    if (sessionId.isEmpty || tableId.isEmpty) {
-      return false;
-    }
-
-    dineIn.cacheTableCredentials(resolvedTableNumber, cachedTablePin);
-    dineIn.startSession(
-      sessionId,
-      tableId,
-      resolvedTableNumber,
-      token: token.isEmpty ? null : token,
-      startedAt: startedAt,
-    );
-    return true;
+    return dineIn.loginOrStartSessionFromCache(_dineInService);
   }
 
   Future<void> _handleSessionSettledAndReset({required String message}) async {
@@ -236,7 +178,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
       _isPaymentResetInProgress = true;
     });
 
-    _stopWaiterPolling();
+    context.read<DineInProvider>().resetWaiterState();
     _stopPaymentSettlementPolling();
 
     _isSettlementPopupVisible = true;
@@ -267,25 +209,17 @@ class _MyTableScreenState extends State<MyTableScreen> {
     }
 
     final dineIn = context.read<DineInProvider>();
-    dineIn.clearSession();
+    await dineIn.clearSessionKeepTableLock();
     if (!mounted) {
       return;
     }
 
-    var startedFreshSession = false;
-    try {
-      startedFreshSession = await _tryStartFreshSession(dineIn);
-    } catch (_) {
-      startedFreshSession = false;
-    }
+    // Guest taps START SESSION on the home resting screen to begin the next session.
 
-    if (!mounted) {
-      return;
-    }
-
+    // Always return to kiosk home after payment — never the PIN screen.
     Navigator.pushNamedAndRemoveUntil(
       context,
-      startedFreshSession ? '/kiosk-home' : '/kiosk-login',
+      '/kiosk-home',
       (_) => false,
     );
   }
@@ -378,6 +312,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
         _isLoadingRounds = false;
       });
       _syncPaymentSettlementPolling(parsed);
+      await _maybeAutoOpenPaymentFlow();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -394,43 +329,13 @@ class _MyTableScreenState extends State<MyTableScreen> {
 
     final dineIn = context.read<DineInProvider>();
     try {
-      final sessionId = dineIn.sessionId;
-      if (sessionId == null || sessionId.isEmpty) {
-        throw Exception('No active dine-in session found.');
-      }
-
-      final response = await DineInService().callWaiter(
-        sessionId,
-        token: dineIn.token,
-        forCashPayment: forCashPayment,
-      );
+      await dineIn.notifyWaiter(forCashPayment: forCashPayment);
       if (!mounted) return;
-
-      final callId = response['call_id']?.toString();
-
-      _waiterAckResetTimer?.cancel();
-      setState(() {
-        _waiterRequestState = _WaiterRequestState.notified;
-        _activeWaiterCallId = callId;
-      });
-
-      if (callId != null && callId.isNotEmpty) {
-        _startWaiterPolling();
-      }
-
-      if (forCashPayment) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Cash payment requested. Waiter has been notified!'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(e.toString()),
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -524,8 +429,26 @@ class _MyTableScreenState extends State<MyTableScreen> {
       }
     }
 
-    dineIn.clearSession();
-    Navigator.pushNamedAndRemoveUntil(context, '/kiosk-login', (_) => false);
+    await dineIn.clearSessionKeepTableLock();
+
+    if (!mounted) return;
+
+    // Try to stay logged into the table (without starting a session) 
+    // so the kiosk doesn't need a PIN re-entry.
+    bool stayLoggedIn = false;
+    try {
+      stayLoggedIn = await _tryStartFreshSession(dineIn);
+    } catch (_) {
+      stayLoggedIn = false;
+    }
+
+    if (!mounted) return;
+
+    Navigator.pushNamedAndRemoveUntil(
+      context,
+      stayLoggedIn ? '/kiosk-home' : '/kiosk-login',
+      (_) => false,
+    );
   }
 
   Widget _buildSessionInfoCard(
@@ -664,10 +587,14 @@ class _MyTableScreenState extends State<MyTableScreen> {
   }
 
   Widget _buildWaiterRequestSection(ThemeData theme) {
+    // Watch the provider so voice-triggered state changes rebuild this card
+    // automatically, just like the manual button path.
+    final waiterState = context.watch<DineInProvider>().waiterRequestState;
+
     String? waiterStatusText;
-    if (_waiterRequestState == _WaiterRequestState.notified) {
+    if (waiterState == WaiterRequestState.notified) {
       waiterStatusText = 'Waiter has been notified!';
-    } else if (_waiterRequestState == _WaiterRequestState.acknowledged) {
+    } else if (waiterState == WaiterRequestState.acknowledged) {
       waiterStatusText =
           'Waiter has received your request and is coming at your table.';
     }
@@ -698,7 +625,7 @@ class _MyTableScreenState extends State<MyTableScreen> {
               ),
             ),
           ),
-          if (_waiterRequestState == _WaiterRequestState.notified)
+          if (waiterState == WaiterRequestState.notified)
             Padding(
               padding: const EdgeInsets.only(top: 6),
               child: Text(
@@ -844,6 +771,8 @@ class _MyTableScreenState extends State<MyTableScreen> {
             const KioskBottomNav(currentIndex: 3),
           ],
         ),
+        floatingActionButton:
+            AppConfig.isKiosk ? const KioskVoiceFab() : null,
       ),
     );
   }
@@ -1124,6 +1053,8 @@ class _OrderHistoryDetailsScreenState
         ],
       ),
       body: body,
+      floatingActionButton:
+          AppConfig.isKiosk ? const KioskVoiceFab() : null,
     );
   }
 }
@@ -1133,10 +1064,17 @@ class _PaymentDetailsScreen extends StatefulWidget {
   final Future<void> Function({bool forCashPayment}) notifyWaiter;
   final Future<void> Function({required String message}) onSessionSettled;
 
+  /// Optional voice-driven auto-trigger: when set to 'card' or 'cash', the
+  /// screen will automatically fire the matching handler after the first
+  /// data load so the user doesn't have to tap. All existing manual flows
+  /// (dialogs, add-card screen, settlement popup) still run.
+  final String? autoPaymentMethod;
+
   const _PaymentDetailsScreen({
     required this.loadRounds,
     required this.notifyWaiter,
     required this.onSessionSettled,
+    this.autoPaymentMethod,
   });
 
   @override
@@ -1147,6 +1085,7 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
   bool _isLoading = true;
   String? _error;
   List<_SessionRound> _rounds = <_SessionRound>[];
+  bool _autoTriggered = false;
 
   double get _sessionTotal {
     return _rounds.fold<double>(0.0, (sum, round) => sum + round.roundTotal);
@@ -1186,6 +1125,7 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
         _rounds = rounds;
         _isLoading = false;
       });
+      await _maybeAutoTriggerPayment();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -1193,6 +1133,33 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
         _error = e.toString().replaceFirst('Exception: ', '');
         _rounds = <_SessionRound>[];
       });
+    }
+  }
+
+  Future<void> _maybeAutoTriggerPayment() async {
+    if (_autoTriggered) return;
+    final method = widget.autoPaymentMethod;
+    if (method == null) return;
+
+    _autoTriggered = true;
+
+    // Respect the same eligibility rules the tap-handlers enforce; if the
+    // guest can't pay yet, let the tap handlers explain why via SnackBars
+    // so the visible state exactly matches what they'd see tapping the
+    // card themselves.
+    if (!_hasOrders || !_hasPendingPayment || !_allRoundsCompleted) {
+      if (method == 'card') {
+        await _handleCardPayment();
+      } else if (method == 'cash') {
+        await _handleCashPayment();
+      }
+      return;
+    }
+
+    if (method == 'card') {
+      await _handleCardPayment();
+    } else if (method == 'cash') {
+      await _handleCashPayment();
     }
   }
 
@@ -1341,7 +1308,56 @@ class _PaymentDetailsScreenState extends State<_PaymentDetailsScreen> {
       return;
     }
 
-    await widget.notifyWaiter(forCashPayment: true);
+    // Notify kitchen only. Session ends when staff confirm cash on the kitchen
+    // dashboard (orders marked paid); `_pollSettlementStatus` on My Table then
+    // triggers the same flow as card: dialog + clear session + `/kiosk-home`.
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Pay by Cash?'),
+          content: Text(
+            'Kitchen will be notified to collect Rs ${_money(_sessionTotal)} in cash. '
+            'Your session will end after they confirm payment on the dashboard.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Notify kitchen'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    try {
+      await widget.notifyWaiter(forCashPayment: true);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Kitchen notified. You will return to the home screen when payment is confirmed.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   Widget _buildPaymentActionTile({

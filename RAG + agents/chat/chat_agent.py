@@ -1,4 +1,4 @@
-﻿import os
+import os
 import json
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
@@ -80,6 +80,11 @@ def remove_from_cart(item_name: str) -> str:
     return f"Removed {item_name} from your cart."
 
 @tool
+def change_quantity(item_name: str, quantity: int) -> str:
+    """Change how many of an item are in the cart (must already be in cart)."""
+    return f"Updated {item_name} quantity to {quantity}."
+
+@tool
 def show_cart() -> str:
     """Display the current items in the shopping cart."""
     return "Your cart is empty."
@@ -127,13 +132,14 @@ tool_registry = {
     "retrieve_menu_context": retrieve_menu_context,
     "add_to_cart": add_to_cart,
     "remove_from_cart": remove_from_cart,
+    "change_quantity": change_quantity,
     "show_cart": show_cart,
     "place_order": place_order, 
     "weather_upsell": weather_upsell,    
 }
 
 # --- 3. DETAILED SYSTEM PROMPT ---
-SHORT_SYSTEM_PROMPT = """You are Khadim, an experienced and friendly restaurant waiter AI for a pakistani restaurant Salt n Pepper restaurant.
+SHORT_SYSTEM_PROMPT = """You are Khadim, an experienced and friendly restaurant waiter AI for a pakistani restaurant.
 
 YOUR PERSONALITY:
 - Be warm, professional, and enthusiastic
@@ -172,7 +178,30 @@ CRITICAL RULES:
 - ONLY use data from search results
 - NEVER make up prices or items
 - Always be friendly and helpful
-- only include items and deals that are actually on the menu, dont make them up"""
+- only include items and deals that are actually on the menu, dont make them up
+
+CUSTOM DEAL INQUIRIES — VERY IMPORTANT:
+If a customer asks whether a custom deal is available, can be made, or
+shows general curiosity (e.g. "kya custom deal hoti hai?", "apke paas
+custom deal ho sakti hai?", "custom deal ban jayegi?", "do you have
+custom deals?", "can you make a deal for us?"), NEVER immediately create
+a deal. Instead, explain the feature warmly and invite them to specify:
+
+Example (Urdu):
+"جی ضرور! ہم آپ کے لیے خصوصی ڈیل تیار کر سکتے ہیں۔ بس مجھے بتائیں:
+۱۔ کس قسم کا کھانا پسند ہے؟ (مثلاً دیسی، چائنیز، فاسٹ فوڈ، بی بی کیو)
+۲۔ کتنے افراد کے لیے ڈیل چاہیے؟
+جیسے ہی آپ بتائیں گے، میں فوراً آپ کے لیے بہترین ڈیل بناتا ہوں!"
+
+Example (English):
+"Absolutely! I can create a custom deal just for you.
+Just tell me:
+1. What type of cuisine? (Desi, Chinese, Fast Food, BBQ)
+2. How many people are you ordering for?
+I'll put together the perfect deal right away!"
+
+Only issue a TOOL_CALL for create_custom_deal AFTER the customer has
+clearly given their preferences AND explicitly asked to create/confirm."""
 
 # --- 4. BUILD TOOL DESCRIPTIONS FOR LLM ---
 tool_descriptions = """
@@ -187,11 +216,14 @@ tool_descriptions = """
 
 4. remove_from_cart | item_name=<name>
    - Removes specific item from cart.
-   
-5. show_cart
+
+5. change_quantity | item_name=<name> | quantity=<number>
+   - Updates quantity of an item already in the cart.
+
+6. show_cart
    - Shows current cart contents.
    
-6. place_order
+7. place_order
    - Finalizes order.
 """
 
@@ -238,6 +270,7 @@ TOOL_CALL: search_menu | query=chicken
 TOOL_CALL: weather_upsell | city=Islamabad
 TOOL_CALL: add_to_cart | item_name=Chicken Tikka | quantity=2
 TOOL_CALL: remove_from_cart | item_name=Chicken Tikka
+TOOL_CALL: change_quantity | item_name=Cheese Burger | quantity=2
 TOOL_CALL: show_cart
 TOOL_CALL: place_order
 

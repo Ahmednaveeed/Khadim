@@ -10,17 +10,21 @@
 //      user says yes → run custom deal flow with stored query
 //   6. _pendingCustomDealQuery stores the query waiting for confirmation
 
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'package:khaadim/providers/cart_provider.dart';
+import 'package:khaadim/services/api_config.dart';
 import 'package:khaadim/services/chat_service.dart';
 import 'package:khaadim/services/conversation_memory.dart';
 import 'package:khaadim/services/voice_command_service.dart';
@@ -64,6 +68,7 @@ class VoiceOrderHandler extends ChangeNotifier {
   late final VoiceCommandService _voiceCmd;
   final FlutterSoundRecorder _recorder = FlutterSoundRecorder();
   final FlutterTts _tts = FlutterTts();
+  final AudioPlayer _gttsPlayer = AudioPlayer();
   late final VoiceCustomDealService _customDeal;
 
   // ── Conversation memory ───────────────────────────────────
@@ -78,11 +83,14 @@ class VoiceOrderHandler extends ChangeNotifier {
   bool _isUrdu = true;
   bool _recorderReady = false;
   bool _ttsReady = false;
+  bool _voiceInitialized = false;
 
   String _lastAnnouncedMessage = '';
   DateTime _lastAnnouncementTime = DateTime.now();
 
-  final String _sessionId = 'session_${DateTime.now().millisecondsSinceEpoch}';
+  // Mutable so the screen can inject the real dine-in session ID.
+  String _sessionId = 'session_${DateTime.now().millisecondsSinceEpoch}';
+  DineInAddItemCallback? _pendingDineInAddItemCallback;
 
   VoiceNavCallbacks? _nav;
 
@@ -92,9 +100,32 @@ class VoiceOrderHandler extends ChangeNotifier {
 
   void setNavCallbacks(VoiceNavCallbacks callbacks) => _nav = callbacks;
 
+  /// Inject the DineInProvider.addItem callback so voice commands add items
+  /// to the dine-in session order rather than the delivery CartProvider.
+  void setDineInAddItemCallback(DineInAddItemCallback callback) {
+    _pendingDineInAddItemCallback = callback;
+    if (_voiceInitialized) {
+      _voiceCmd.setDineInAddItemCallback(callback);
+    }
+  }
+
+  /// Update the session ID used for LLM conversation memory.
+  /// Call this whenever the dine-in session ID changes.
+  void updateSessionId(String sessionId) {
+    if (sessionId.isNotEmpty) _sessionId = sessionId;
+  }
+
   Future<void> init() async {
-    _customDeal = VoiceCustomDealService(_tts);
+    // Pass this handler's _speak as the speaker so the deal service can
+    // route Urdu through the backend gTTS pipeline (FlutterTts alone has
+    // no Urdu voice on most Android builds, which is why deal summaries
+    // were previously silent).
+    _customDeal = VoiceCustomDealService(_tts, speaker: _speak);
     _voiceCmd = VoiceCommandService(tts: _tts);
+    _voiceInitialized = true;
+    if (_pendingDineInAddItemCallback != null) {
+      _voiceCmd.setDineInAddItemCallback(_pendingDineInAddItemCallback!);
+    }
     await _initTTS();
     await _initRecorder();
   }
@@ -143,6 +174,7 @@ class VoiceOrderHandler extends ChangeNotifier {
   Future<void> onMicDown(BuildContext context) async {
     if (_isProcessing || _isRecording) return;
     await _tts.stop();
+    await _gttsPlayer.stop();
     _lastAnnouncedMessage = '';
     HapticFeedback.mediumImpact();
     _isUrdu ? await _startWhisper(context) : await _startNativeSTT(context);
@@ -247,9 +279,13 @@ class VoiceOrderHandler extends ChangeNotifier {
       }
 
       await _executeFromResponse(context, transcript, voiceRes);
-    } on ChatServiceException {
+    } on ChatServiceException catch (e, st) {
+      debugPrint('[VoiceOrderHandler] ChatServiceException: $e\n$st');
       _snackError(context, 'درخواست میں خرابی');
-    } catch (_) {
+    } catch (e, st) {
+      // Surface the real exception — the blanket "kharabi" popup without a
+      // log made this near-impossible to debug last time.
+      debugPrint('[VoiceOrderHandler] Unexpected error in _processUrduAudio: $e\n$st');
       _snackError(context, 'خرابی — دوبارہ کوشش کریں');
     } finally {
       if (await file.exists()) await file.delete();
@@ -270,36 +306,6 @@ class VoiceOrderHandler extends ChangeNotifier {
       if (text != null && text.trim().isNotEmpty) {
         _memory.add(role: 'user', text: text.trim());
         _snackInfo(context, '🎤 $text');
-
-        bool isShortYes(String text) {
-          final t = text.toLowerCase().trim();
-          return t == 'yes' ||
-              t == 'yeah' ||
-              t == 'yep' ||
-              t == 'sure' ||
-              t == 'ok' ||
-              t == 'okay' ||
-              t == 'haan' ||
-              t == 'ha' ||
-              t == 'ji' ||
-              t == 'bilkul' ||
-              t == 'theek' ||
-              t == 'ہاں' ||
-              t == 'جی' ||
-              t == 'بالکل' ||
-              t == 'ٹھیک';
-        }
-
-        bool isShortNo(String text) {
-          final t = text.toLowerCase().trim();
-          return t == 'no' ||
-              t == 'nope' ||
-              t == 'nahi' ||
-              t == 'nai' ||
-              t == 'نہیں' ||
-              t == 'cancel' ||
-              t == 'kainsal';
-        }
 
         // Context-window yes/no detection (English path)
         if (_pendingCustomDealQuery != null) {
@@ -357,7 +363,8 @@ class VoiceOrderHandler extends ChangeNotifier {
         memory: _memory,
       );
       await _handleResult(context, result, originalTranscript: transcript);
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('[VoiceOrderHandler] _executeFromResponse error: $e\n$st');
       _snackError(context, 'خرابی — دوبارہ کوشش کریں');
     } finally {
       _isProcessing = false;
@@ -403,14 +410,21 @@ class VoiceOrderHandler extends ChangeNotifier {
 
     final action = result.actionTaken;
 
-    if (result.navigated) return;
+    if (result.navigated) {
+      if (result.reply.isNotEmpty) {
+        await _speak(result.reply);
+      }
+      return;
+    }
 
     if (action == 'custom_deal') {
-      await _runCustomDealFlow(
-          context,
-          originalTranscript.isNotEmpty
-              ? originalTranscript
-              : result.transcript);
+      // Prefer the canonical cleaned query the backend already extracted
+      // (e.g. "create chinese deal for 2 people"). Falls back to the raw
+      // mic transcript only when the backend couldn't normalize it.
+      final cleanedQuery = result.transcript.trim();
+      final fallback = originalTranscript.trim();
+      final dealQuery = cleanedQuery.isNotEmpty ? cleanedQuery : fallback;
+      await _runCustomDealFlow(context, dealQuery);
       return;
     }
 
@@ -432,7 +446,15 @@ class VoiceOrderHandler extends ChangeNotifier {
 
     if (action == 'added_to_cart') {
       await _speak(result.reply);
-      await _checkUpsell(context);
+      // Upsell is best-effort — if the cart provider, network, or chat
+      // service raises anything, swallow it. A failed upsell must never
+      // cascade into the outer catch-all which would show the generic
+      // "خرابی — دوبارہ کوشش کریں" popup after a perfectly successful add.
+      try {
+        await _checkUpsell(context);
+      } catch (e, st) {
+        debugPrint('[VoiceOrderHandler] upsell failed (non-fatal): $e\n$st');
+      }
       return;
     }
 
@@ -474,7 +496,6 @@ class VoiceOrderHandler extends ChangeNotifier {
       if (result.needsClarification) {
         if (result.clarificationQuestion.isNotEmpty) {
           _memory.add(role: 'assistant', text: result.clarificationQuestion);
-          // Store pending query so next "yes" triggers the deal
           _pendingCustomDealQuery = userQuery;
         }
         if (context.mounted) {
@@ -489,10 +510,24 @@ class VoiceOrderHandler extends ChangeNotifier {
         _memory.add(role: 'assistant', text: msg);
         if (context.mounted) {
           _snackInfo(context, msg);
-          Provider.of<CartProvider>(context, listen: false).sync();
+          // CartProvider.sync is delivery-mode only; in Kiosk we use
+          // DineInProvider instead. Guard the call so a missing cart in
+          // kiosk doesn't throw ProviderNotFoundException and trigger the
+          // generic "kharabi" error popup up the chain.
+          try {
+            Provider.of<CartProvider>(context, listen: false).sync();
+          } catch (e) {
+            debugPrint('[VoiceOrderHandler] CartProvider.sync skipped: $e');
+          }
         }
       } else if (result.error.isNotEmpty) {
         if (context.mounted) _snackError(context, result.error);
+      }
+    } catch (e, st) {
+      debugPrint('[VoiceOrderHandler] _runCustomDealFlow error: $e\n$st');
+      if (context.mounted) {
+        _snackError(
+            context, _isUrdu ? 'ڈیل بنانے میں خرابی' : 'Deal creation error');
       }
     } finally {
       _isProcessing = false;
@@ -525,17 +560,109 @@ class VoiceOrderHandler extends ChangeNotifier {
   }
 
   // ── TTS ───────────────────────────────────────────────────
+  Future<bool> _speakWithBackendGtts(String text) async {
+    if (!_isUrdu || text.trim().isEmpty) return false;
+
+    try {
+      final res = await http
+          .post(
+            Uri.parse('${ApiConfig.baseUrl}/voice/tts'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'text': text, 'language': 'ur'}),
+          )
+          .timeout(const Duration(seconds: 16));
+
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return false;
+      }
+
+      final decoded = jsonDecode(res.body);
+      if (decoded is! Map<String, dynamic>) return false;
+
+      final rawUrl =
+          (decoded['audio_url'] ?? decoded['tts_audio_url'] ?? '').toString();
+      final audioUrl = rawUrl.trim();
+      if (audioUrl.isEmpty) return false;
+
+      final absoluteUrl =
+          audioUrl.startsWith('http://') || audioUrl.startsWith('https://')
+          ? audioUrl
+          : '${ApiConfig.baseUrl}$audioUrl';
+
+      await _gttsPlayer.stop();
+      await _gttsPlayer.play(UrlSource(absoluteUrl));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _speak(String text) async {
-    if (!_ttsReady || text.isEmpty) return;
+    // Strip markdown / emojis BEFORE sending to either gTTS or the on-device
+    // TTS engine — otherwise Urdu voices pronounce `*` as "sitara", `#` as
+    // "hash", and emojis as their shortcode names.
+    final clean = _sanitizeForSpeech(text);
+    if (!_ttsReady || clean.isEmpty) return;
     final now = DateTime.now();
-    if (text == _lastAnnouncedMessage &&
+    if (clean == _lastAnnouncedMessage &&
         now.difference(_lastAnnouncementTime).inSeconds < 10) {
       return;
     }
-    await _tts.stop();
-    await _tts.speak(text);
-    _lastAnnouncedMessage = text;
+
+    final playedByGtts = await _speakWithBackendGtts(clean);
+    if (!playedByGtts) {
+      await _gttsPlayer.stop();
+      await _tts.stop();
+      await _tts.speak(clean);
+    }
+
+    _lastAnnouncedMessage = clean;
     _lastAnnouncementTime = now;
+  }
+
+  /// Removes markdown decorations (`**`, `__`, `#`, backticks, bullets) and
+  /// emojis so text-to-speech reads a natural sentence instead of announcing
+  /// every stray symbol. Uses a manual codepoint filter rather than a
+  /// supplementary-plane regex so it never throws on any Dart SDK.
+  String _sanitizeForSpeech(String input) {
+    if (input.isEmpty) return input;
+    var s = input;
+
+    s = s.replaceAll(RegExp(r'```[\s\S]*?```'), ' ');
+    s = s.replaceAll(RegExp(r'`([^`]*)`'), r' $1 ');
+    s = s.replaceAllMapped(
+      RegExp(r'\[([^\]]+)\]\([^)]*\)'),
+      (m) => m.group(1) ?? '',
+    );
+    // Dart's RegExp does NOT accept the inline `(?m)` flag — the engine is
+    // ECMA-based and throws FormatException. Use `multiLine: true` instead.
+    // Previously this crashed inside _speak and the surrounding catch
+    // surfaced the generic "kharabi, dubara koshish karein" popup, so every
+    // voice reply appeared silent.
+    s = s.replaceAll(RegExp(r'^\s*#{1,6}\s+', multiLine: true), '');
+    s = s.replaceAll(RegExp(r'^\s*[-*•]\s+', multiLine: true), '');
+    s = s.replaceAll(RegExp(r'[*_~`#>]+'), ' ');
+    s = s.replaceAll('×', ' x ');
+
+    final buf = StringBuffer();
+    for (final rune in s.runes) {
+      if (_isPictographOrSymbol(rune)) {
+        buf.write(' ');
+      } else {
+        buf.writeCharCode(rune);
+      }
+    }
+    s = buf.toString();
+
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s;
+  }
+
+  bool _isPictographOrSymbol(int rune) {
+    if (rune >= 0x2600 && rune <= 0x27BF) return true;
+    if (rune >= 0x1F000 && rune <= 0x1FAFF) return true;
+    if (rune == 0x200D || rune == 0xFE0F) return true;
+    return false;
   }
 
   void _snackInfo(BuildContext context, String msg) {
@@ -564,6 +691,8 @@ class VoiceOrderHandler extends ChangeNotifier {
   @override
   void dispose() {
     _recorder.closeRecorder();
+    _gttsPlayer.stop();
+    _gttsPlayer.dispose();
     _tts.stop();
     super.dispose();
   }

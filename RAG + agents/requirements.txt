@@ -25,6 +25,7 @@ langchain-groq
 tiktoken
 
 # Voice (inference only)
+elevenlabs
 openai-whisper
 gtts
 librosa

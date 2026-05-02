@@ -6,6 +6,7 @@ import 'package:khaadim/screens/orders/order_tracking_screen.dart';
 import 'package:khaadim/services/order_service.dart';
 import 'package:khaadim/screens/support/feedback_screen.dart';
 import 'package:khaadim/services/favorites_service.dart';
+import 'package:khaadim/widgets/kiosk_voice_fab.dart';
 
 class OrderHistoryScreen extends StatefulWidget {
   const OrderHistoryScreen({super.key});
@@ -171,6 +172,8 @@ class _OrderHistoryScreenState extends State<OrderHistoryScreen> {
       bottomNavigationBar: AppConfig.isKiosk
           ? const KioskBottomNav(currentIndex: 3)
           : null,
+      floatingActionButton:
+          AppConfig.isKiosk ? const KioskVoiceFab() : null,
     );
   }
 }

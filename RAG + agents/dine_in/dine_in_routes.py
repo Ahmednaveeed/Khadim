@@ -322,12 +322,16 @@ def get_dine_in_recommendations(payload: DineInRecommendationsRequest):
 
 @router.post("/table-login")
 def table_login(payload: TableLoginRequest):
-    raw_table_number = payload.table_number.strip()
-    table_number = raw_table_number.upper()
-    # Accept both "T1" and "1" style input from kiosk keypad/screens.
-    if table_number and not table_number.startswith("T") and table_number.isdigit():
-        table_number = f"T{table_number}"
+    raw_table_number = payload.table_number.strip().upper()
     pin = payload.pin.strip()
+
+    # Accommodate both "3" and "T3" style table storage natively
+    if raw_table_number.startswith("T") and raw_table_number[1:].isdigit():
+        alternate = raw_table_number[1:]
+    elif raw_table_number.isdigit():
+        alternate = f"T{raw_table_number}"
+    else:
+        alternate = raw_table_number
 
     with SQL_ENGINE.begin() as conn:
         table_row = conn.execute(
@@ -335,12 +339,78 @@ def table_login(payload: TableLoginRequest):
                 """
                 SELECT table_id, table_number, status
                 FROM public.restaurant_tables
-                                WHERE UPPER(table_number) = :table_number
+                WHERE UPPER(table_number) IN (:table_number, :alternate)
                   AND table_pin = :pin
                 LIMIT 1
                 """
             ),
-            {"table_number": table_number, "pin": pin},
+            {"table_number": raw_table_number, "alternate": alternate, "pin": pin},
+        ).mappings().fetchone()
+
+        if not table_row:
+            raise HTTPException(status_code=401, detail="Invalid table number or PIN")
+
+        active_session_row = conn.execute(
+            text(
+                """
+                SELECT session_id, table_id, started_at
+                FROM public.dine_in_sessions
+                WHERE table_id = :table_id
+                  AND status = 'active'
+                ORDER BY started_at DESC
+                LIMIT 1
+                """
+            ),
+            {"table_id": table_row["table_id"]},
+        ).mappings().fetchone()
+
+        if active_session_row:
+            return {
+                "session_id": str(active_session_row["session_id"]),
+                "table_id": str(active_session_row["table_id"]),
+                "table_number": table_row["table_number"],
+                "started_at": active_session_row["started_at"].isoformat()
+                if active_session_row["started_at"]
+                else None,
+            }
+
+        # Do NOT start a session yet; verify the table is available and return table info.
+        if (table_row["status"] or "").lower() != "available":
+            raise HTTPException(status_code=409, detail="Table is not available")
+
+    return {
+        "session_id": None,
+        "table_id": str(table_row["table_id"]),
+        "table_number": table_row["table_number"],
+        "started_at": None,
+    }
+
+
+@router.post("/table-start-session")
+def table_start_session(payload: TableLoginRequest):
+    raw_table_number = payload.table_number.strip().upper()
+    pin = payload.pin.strip()
+
+    # Accommodate both "3" and "T3" style table storage natively
+    if raw_table_number.startswith("T") and raw_table_number[1:].isdigit():
+        alternate = raw_table_number[1:]
+    elif raw_table_number.isdigit():
+        alternate = f"T{raw_table_number}"
+    else:
+        alternate = raw_table_number
+
+    with SQL_ENGINE.begin() as conn:
+        table_row = conn.execute(
+            text(
+                """
+                SELECT table_id, table_number, status
+                FROM public.restaurant_tables
+                WHERE UPPER(table_number) IN (:table_number, :alternate)
+                  AND table_pin = :pin
+                LIMIT 1
+                """
+            ),
+            {"table_number": raw_table_number, "alternate": alternate, "pin": pin},
         ).mappings().fetchone()
 
         if not table_row:

@@ -1,7 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:khaadim/services/dine_in_service.dart';
 import 'package:khaadim/services/dine_in_session_storage.dart';
+
+/// UI-facing state of the "Call Waiter" workflow.
+///
+/// Shared by both the manual button on `MyTableScreen` and the voice-command
+/// pipeline so either entry-point produces the same visual feedback.
+enum WaiterRequestState { idle, notified, acknowledged }
 
 class CardDetails {
   final String cardNumber;
@@ -27,6 +34,42 @@ class DineInProvider extends ChangeNotifier {
   List<Map<String, dynamic>> currentOrderItems = [];
   bool isLoading = false;
 
+  // ── Waiter-call shared state ─────────────────────────────────────────────
+  // Both the manual "CALL WAITER" button and the voice-command handler drive
+  // the same state machine here so the banner / polling / auto-reset work
+  // identically regardless of how the call was initiated.
+  WaiterRequestState _waiterRequestState = WaiterRequestState.idle;
+  String? _activeWaiterCallId;
+  Timer? _waiterStatusPoller;
+  Timer? _waiterAckResetTimer;
+  final DineInService _waiterService = DineInService();
+
+  WaiterRequestState get waiterRequestState => _waiterRequestState;
+  String? get activeWaiterCallId => _activeWaiterCallId;
+  bool get isWaiterRequestPending =>
+      _waiterRequestState != WaiterRequestState.idle;
+
+  // ── Voice-payment disambiguation ─────────────────────────────────────────
+  // When the guest says "mujhe payment karni hai" without specifying the
+  // method, the voice service asks "card ya cash?" and sets this flag.
+  // The next inbound utterance that mentions a method is routed straight
+  // to the matching handler. Consumers must call [clearAwaitingPaymentMethod]
+  // after consuming it.
+  bool _awaitingPaymentMethod = false;
+  bool get awaitingPaymentMethod => _awaitingPaymentMethod;
+
+  void setAwaitingPaymentMethod() {
+    if (_awaitingPaymentMethod) return;
+    _awaitingPaymentMethod = true;
+    notifyListeners();
+  }
+
+  void clearAwaitingPaymentMethod() {
+    if (!_awaitingPaymentMethod) return;
+    _awaitingPaymentMethod = false;
+    notifyListeners();
+  }
+
   String? get cachedTableNumber => _cachedTableNumber;
   String? get cachedTablePin => _cachedTablePin;
   bool get hasCachedTableCredentials {
@@ -37,6 +80,7 @@ class DineInProvider extends ChangeNotifier {
   void cacheTableCredentials(String tableNumber, String pin) {
     _cachedTableNumber = tableNumber.trim();
     _cachedTablePin = pin.trim();
+    unawaited(DineInSessionStorage.saveTablePin(_cachedTablePin ?? ''));
   }
 
   void clearCachedTableCredentials() {
@@ -44,10 +88,10 @@ class DineInProvider extends ChangeNotifier {
     _cachedTablePin = null;
   }
 
-  void startSession(
-    String sessionId,
+  void loginTable(
     String tableId,
     String tableNumber, {
+    String? sessionId,
     String? token,
     DateTime? startedAt,
   }) {
@@ -55,7 +99,7 @@ class DineInProvider extends ChangeNotifier {
     this.tableId = tableId;
     this.tableNumber = tableNumber;
     this.token = token;
-    this.startedAt = startedAt ?? DateTime.now();
+    this.startedAt = startedAt;
     sessionCard = null;
     currentOrderItems.clear();
     unawaited(
@@ -64,8 +108,19 @@ class DineInProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void applySession(String sessionId, DateTime startedAt) {
+    this.sessionId = sessionId;
+    this.startedAt = startedAt;
+    if (tableId != null && tableNumber != null) {
+      unawaited(
+        _persistSession(sessionId, tableId!, tableNumber!, token, startedAt),
+      );
+    }
+    notifyListeners();
+  }
+
   Future<void> _persistSession(
-    String sessionId,
+    String? sessionId,
     String tableId,
     String tableNumber,
     String? token,
@@ -73,7 +128,7 @@ class DineInProvider extends ChangeNotifier {
   ) async {
     try {
       await DineInSessionStorage.saveSession(
-        sessionId: sessionId,
+        sessionId: sessionId ?? '',
         tableId: tableId,
         tableNumber: tableNumber,
         token: token,
@@ -90,7 +145,12 @@ class DineInProvider extends ChangeNotifier {
       return false;
     }
 
+    // It is perfectly correct to be logged in and waiting (sessionId == null).
     sessionId = saved['session_id'];
+    if (sessionId != null && sessionId!.isEmpty) {
+      sessionId = null;
+    }
+
     tableId = saved['table_id'];
     tableNumber = saved['table_number'];
     final restoredToken = saved['token'];
@@ -99,12 +159,23 @@ class DineInProvider extends ChangeNotifier {
         ? null
         : restoredToken;
     startedAt = restoredStartedAt == null || restoredStartedAt.isEmpty
-        ? DateTime.now()
-        : DateTime.tryParse(restoredStartedAt) ?? DateTime.now();
+        ? null
+        : DateTime.tryParse(restoredStartedAt);
     sessionCard = null;
     currentOrderItems.clear();
+
+    final pin = (saved['table_pin'] ?? '').trim();
+    if (pin.isNotEmpty &&
+        tableNumber != null &&
+        tableNumber!.trim().isNotEmpty) {
+      _cachedTableNumber = tableNumber!.trim();
+      _cachedTablePin = pin;
+    }
+
     notifyListeners();
-    return true;
+
+    // The user is authenticated securely to the Table. Bypasses the Lock Screen.
+    return tableId != null && tableId!.isNotEmpty;
   }
 
   void addItem(
@@ -204,29 +275,104 @@ class DineInProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  void clearSession() {
+  /// Clears the active dine-in session but keeps this kiosk locked to the same
+  /// table (table id/number + PIN on disk) so guests never re-enter the PIN
+  /// after payment or manual end — only "Start session" is needed.
+  Future<void> clearSessionKeepTableLock() async {
     sessionId = null;
-    tableNumber = null;
-    tableId = null;
     token = null;
     startedAt = null;
     sessionCard = null;
     currentOrderItems.clear();
     isLoading = false;
-    unawaited(_clearPersistedSession());
+    _resetWaiterStateInternal(notify: false);
+    tableNumber = null;
+    tableId = null;
+    try {
+      await DineInSessionStorage.clearActiveSessionOnly();
+      await _syncTableIdentityFromStorage();
+    } catch (_) {}
     notifyListeners();
   }
 
-  void endSession() {
-    clearSession();
+  Future<void> _syncTableIdentityFromStorage() async {
+    final saved = await DineInSessionStorage.getSession();
+    if (saved == null) return;
+    final tid = saved['table_id'];
+    final tnum = saved['table_number'];
+    final pin = (saved['table_pin'] ?? '').trim();
+    if (tid != null && tid.isNotEmpty) tableId = tid;
+    if (tnum != null && tnum.isNotEmpty) tableNumber = tnum;
+    if (pin.isNotEmpty && tnum != null && tnum.isNotEmpty) {
+      _cachedTableNumber = tnum.trim();
+      _cachedTablePin = pin;
+    }
   }
 
-  Future<void> _clearPersistedSession() async {
-    try {
-      await DineInSessionStorage.clearSession();
-    } catch (_) {
-      // Ignore persistence errors while ending session.
+  /// Loads table number + PIN from secure storage when in-memory cache is empty
+  /// (e.g. rare timing edge). Safe to call before "Start session".
+  Future<void> ensureTableCredentialsFromStorage() async {
+    if (hasCachedTableCredentials) return;
+    await _syncTableIdentityFromStorage();
+    notifyListeners();
+  }
+
+  /// Same flow as after card payment / first PIN login: [tableLogin], and if
+  /// the table has no active session yet (common right after payment), call
+  /// [tableStartSession], then [loginTable] with ids + session so the full
+  /// menu home appears — not just [applySession].
+  Future<bool> loginOrStartSessionFromCache(DineInService service) async {
+    await ensureTableCredentialsFromStorage();
+    if (!hasCachedTableCredentials) return false;
+
+    final num = _cachedTableNumber!.trim();
+    final pin = _cachedTablePin!.trim();
+
+    final loginResult = await service.tableLogin(num, pin);
+    var sessionId = (loginResult['session_id'] ?? '').toString();
+    final tableId = (loginResult['table_id'] ?? '').toString();
+    var resolvedTableNumber =
+        (loginResult['table_number'] ?? num).toString();
+    final tok = (loginResult['token'] ?? loginResult['access_token'] ?? '')
+        .toString();
+    var startedAtRaw = (loginResult['started_at'] ?? '').toString();
+    DateTime? startedAt =
+        startedAtRaw.isEmpty ? null : DateTime.tryParse(startedAtRaw);
+
+    if (tableId.isEmpty) return false;
+
+    if (sessionId.isNotEmpty) {
+      cacheTableCredentials(resolvedTableNumber, pin);
+      loginTable(
+        tableId,
+        resolvedTableNumber,
+        sessionId: sessionId,
+        token: tok.isNotEmpty ? tok : null,
+        startedAt: startedAt,
+      );
+      return true;
     }
+
+    final startResult = await service.tableStartSession(num, pin);
+    sessionId = (startResult['session_id'] ?? '').toString();
+    final tableId2 = (startResult['table_id'] ?? '').toString();
+    resolvedTableNumber =
+        (startResult['table_number'] ?? resolvedTableNumber).toString();
+    startedAtRaw = (startResult['started_at'] ?? '').toString();
+    startedAt =
+        startedAtRaw.isEmpty ? null : DateTime.tryParse(startedAtRaw);
+
+    if (sessionId.isEmpty || tableId2.isEmpty) return false;
+
+    cacheTableCredentials(resolvedTableNumber, pin);
+    loginTable(
+      tableId2,
+      resolvedTableNumber,
+      sessionId: sessionId,
+      token: null,
+      startedAt: startedAt,
+    );
+    return true;
   }
 
   double get orderTotal {
@@ -235,5 +381,118 @@ class DineInProvider extends ChangeNotifier {
       final quantity = (item['quantity'] as num?)?.toInt() ?? 0;
       return sum + (price * quantity);
     });
+  }
+
+  // ── Waiter-call API ──────────────────────────────────────────────────────
+
+  /// Posts a waiter-call to the backend and flips the shared state to
+  /// `notified`. Kicks off polling so the state advances to `acknowledged`
+  /// once the kitchen dashboard resolves the call, after which it auto-resets
+  /// to `idle` 5s later.
+  ///
+  /// Returns the raw backend response so callers (e.g. the cash-payment
+  /// dialog) can read `call_id` / `message`. Throws on failure so callers can
+  /// show a snackbar.
+  Future<Map<String, dynamic>> notifyWaiter({
+    bool forCashPayment = false,
+  }) async {
+    final activeSession = sessionId;
+    if (activeSession == null || activeSession.isEmpty) {
+      throw Exception('No active dine-in session found.');
+    }
+
+    final response = await _waiterService.callWaiter(
+      activeSession,
+      token: token,
+      forCashPayment: forCashPayment,
+    );
+
+    final callId = response['call_id']?.toString();
+    _waiterAckResetTimer?.cancel();
+    _activeWaiterCallId = (callId != null && callId.isNotEmpty) ? callId : null;
+    _waiterRequestState = WaiterRequestState.notified;
+    notifyListeners();
+
+    if (_activeWaiterCallId != null) {
+      _startWaiterPolling();
+    }
+
+    return response;
+  }
+
+  /// Cancels in-flight polling / timers and returns the banner to idle.
+  /// Safe to call from any code path (session logout, screen dispose, etc).
+  void resetWaiterState() => _resetWaiterStateInternal(notify: true);
+
+  void _resetWaiterStateInternal({required bool notify}) {
+    _waiterStatusPoller?.cancel();
+    _waiterStatusPoller = null;
+    _waiterAckResetTimer?.cancel();
+    _waiterAckResetTimer = null;
+    final changed = _waiterRequestState != WaiterRequestState.idle ||
+        _activeWaiterCallId != null;
+    _waiterRequestState = WaiterRequestState.idle;
+    _activeWaiterCallId = null;
+    if (notify && changed) {
+      notifyListeners();
+    }
+  }
+
+  void _startWaiterPolling() {
+    _waiterStatusPoller?.cancel();
+    _waiterStatusPoller = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollWaiterCallStatus();
+    });
+  }
+
+  Future<void> _pollWaiterCallStatus() async {
+    final callId = _activeWaiterCallId;
+    final activeSession = sessionId;
+    if (callId == null || callId.isEmpty) {
+      _waiterStatusPoller?.cancel();
+      _waiterStatusPoller = null;
+      return;
+    }
+    if (activeSession == null || activeSession.isEmpty) {
+      _waiterStatusPoller?.cancel();
+      _waiterStatusPoller = null;
+      return;
+    }
+
+    try {
+      final statusData = await _waiterService.fetchWaiterCallStatus(
+        activeSession,
+        callId,
+        token: token,
+      );
+
+      final isResolved = statusData['resolved'] == true;
+      if (!isResolved ||
+          _waiterRequestState == WaiterRequestState.acknowledged) {
+        return;
+      }
+
+      _waiterStatusPoller?.cancel();
+      _waiterStatusPoller = null;
+      _waiterRequestState = WaiterRequestState.acknowledged;
+      notifyListeners();
+      _scheduleWaiterAckReset();
+    } catch (_) {
+      // Swallow transient errors; the periodic timer will retry.
+    }
+  }
+
+  void _scheduleWaiterAckReset() {
+    _waiterAckResetTimer?.cancel();
+    _waiterAckResetTimer = Timer(const Duration(seconds: 5), () {
+      _resetWaiterStateInternal(notify: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _waiterStatusPoller?.cancel();
+    _waiterAckResetTimer?.cancel();
+    super.dispose();
   }
 }

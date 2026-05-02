@@ -22,6 +22,21 @@ class DineInService {
     return _handleResponse(response);
   }
 
+  Future<Map<String, dynamic>> tableStartSession(
+    String tableNumber,
+    String pin,
+  ) async {
+    final url = Uri.parse('$_baseUrl/dine-in/table-start-session');
+
+    final response = await http.post(
+      url,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'table_number': tableNumber, 'pin': pin}),
+    );
+
+    return _handleResponse(response);
+  }
+
   Future<Map<String, dynamic>> placeOrder(
     String sessionId,
     List<Map<String, dynamic>> items,
@@ -59,6 +74,20 @@ class DineInService {
     } catch (_) {
       return [];
     }
+  }
+
+  Future<Map<String, dynamic>> fetchTopSellers({String? token}) async {
+    final url = Uri.parse('$_baseUrl/dine-in/top-sellers');
+
+    final response = await http.get(
+      url,
+      headers: {
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      },
+    );
+
+    return _handleResponse(response);
   }
 
   Future<List<Map<String, dynamic>>> fetchSessionOrders(

@@ -61,9 +61,6 @@ class _TablePinScreenState extends State<TablePinScreen> {
           ? null
           : DateTime.tryParse(startedAtRaw);
 
-      if (sessionId.isEmpty) {
-        throw Exception('Table login succeeded but session_id is missing.');
-      }
       if (tableId.isEmpty) {
         throw Exception('Table login succeeded but table_id is missing.');
       }
@@ -73,11 +70,11 @@ class _TablePinScreenState extends State<TablePinScreen> {
       final dineInProvider = context.read<DineInProvider>();
       dineInProvider.cacheTableCredentials(resolvedTableNumber, pin);
 
-      dineInProvider.startSession(
-        sessionId,
+      dineInProvider.loginTable(
         tableId,
         resolvedTableNumber,
-        token: token.isEmpty ? null : token,
+        sessionId: sessionId.isNotEmpty ? sessionId : null,
+        token: token.isNotEmpty ? token : null,
         startedAt: startedAt,
       );
 
@@ -190,8 +187,8 @@ class _TablePinScreenState extends State<TablePinScreen> {
                               if (pin.isEmpty) {
                                 return 'Please enter your PIN';
                               }
-                              if (pin.length != 4) {
-                                return 'PIN must be 4 digits';
+                              if (pin.length != 6) {
+                                return 'PIN must be 6 digits';
                               }
                               return null;
                             },

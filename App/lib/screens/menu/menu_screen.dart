@@ -6,13 +6,31 @@ import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
 import 'package:khaadim/services/menu_service.dart';
 import 'package:khaadim/utils/ImageResolver.dart';
 import 'package:khaadim/services/favorites_service.dart';
+import 'package:khaadim/widgets/kiosk_voice_fab.dart';
 import 'package:provider/provider.dart';
 import 'package:khaadim/providers/cart_provider.dart';
 import 'package:khaadim/screens/cart/cart_screen.dart';
 
 
 class MenuScreen extends StatefulWidget {
-  const MenuScreen({super.key});
+  /// Optional pre-selected cuisine filter. Accepts any common variant
+  /// (e.g. "bbq", "BBQ", "fast_food", "fast food"). Value is normalized
+  /// to match the chip labels in [_MenuScreenState.cuisines].
+  final String? initialCuisine;
+
+  /// Optional pre-selected category filter (e.g. "drink", "main").
+  final String? initialCategory;
+
+  /// Optional pre-filled search query that mirrors typing in the search
+  /// bar on launch — useful when the user names a specific dish by voice.
+  final String? initialSearch;
+
+  const MenuScreen({
+    super.key,
+    this.initialCuisine,
+    this.initialCategory,
+    this.initialSearch,
+  });
 
   @override
   State<MenuScreen> createState() => _MenuScreenState();
@@ -30,11 +48,168 @@ class _MenuScreenState extends State<MenuScreen> {
   String searchQuery = "";
 
   bool loading = true;
+  bool _routeArgsApplied = false;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
+    _applyInitialFiltersFromWidget();
     loadMenu();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_routeArgsApplied) return;
+    _routeArgsApplied = true;
+
+    // Voice navigation hands us filters via Navigator.pushNamed(arguments:).
+    // Constructor args win; route args fill any still-default slots so
+    // both entry points work without clobbering each other.
+    final raw = ModalRoute.of(context)?.settings.arguments;
+    if (raw is! Map) return;
+
+    String? readString(String key) {
+      final v = raw[key];
+      if (v == null) return null;
+      final s = v.toString().trim();
+      return s.isEmpty ? null : s;
+    }
+
+    bool changed = false;
+
+    final routeCuisine = readString('cuisine') ?? readString('cuisine_filter');
+    if (routeCuisine != null && selectedCuisine == 'All') {
+      final label = _normalizeCuisineLabel(routeCuisine);
+      if (label != null) {
+        selectedCuisine = label;
+        changed = true;
+      }
+    }
+
+    final routeCategory =
+        readString('category') ?? readString('category_filter');
+    if (routeCategory != null && selectedCategory == 'All') {
+      final label = _normalizeCategoryLabel(routeCategory);
+      if (label != null) {
+        selectedCategory = label;
+        changed = true;
+      }
+    }
+
+    final routeSearch = readString('search') ?? readString('query');
+    if (routeSearch != null && searchQuery.isEmpty) {
+      searchQuery = routeSearch;
+      _searchController.text = routeSearch;
+      changed = true;
+    }
+
+    if (changed) {
+      applyFilters();
+    }
+  }
+
+  /// Seed filter state from constructor arguments. Called from initState so
+  /// the very first [applyFilters] (triggered by [loadMenu]) honours voice
+  /// pre-selections without waiting for a rebuild.
+  void _applyInitialFiltersFromWidget() {
+    final cuisine = widget.initialCuisine;
+    if (cuisine != null && cuisine.trim().isNotEmpty) {
+      final label = _normalizeCuisineLabel(cuisine);
+      if (label != null) selectedCuisine = label;
+    }
+
+    final category = widget.initialCategory;
+    if (category != null && category.trim().isNotEmpty) {
+      final label = _normalizeCategoryLabel(category);
+      if (label != null) selectedCategory = label;
+    }
+
+    final search = widget.initialSearch;
+    if (search != null && search.trim().isNotEmpty) {
+      searchQuery = search.trim();
+      _searchController.text = searchQuery;
+    }
+  }
+
+  /// Map whatever shape the voice pipeline sends us onto the chip labels
+  /// already defined in [cuisines]. Returns null for unknown values so the
+  /// caller can simply leave the default "All" in place.
+  String? _normalizeCuisineLabel(String raw) {
+    final t = raw.trim().toLowerCase();
+    if (t.isEmpty || t == 'all') return null;
+
+    for (final label in cuisines) {
+      if (label == 'All') continue;
+      if (label.toLowerCase() == t) return label;
+    }
+
+    if (t == 'bbq' ||
+        t.contains('barbe') ||
+        t.contains('tikka') ||
+        t.contains('boti') ||
+        t.contains('grill')) {
+      return 'BBQ';
+    }
+    if (t.contains('chinese') ||
+        t.contains('chow') ||
+        t.contains('manchur') ||
+        t.contains('szechuan')) {
+      return 'Chinese';
+    }
+    if (t.contains('desi') ||
+        t.contains('pakistani') ||
+        t.contains('karahi') ||
+        t.contains('biryani') ||
+        t.contains('nihari')) {
+      return 'Desi';
+    }
+    if (t.contains('fast') ||
+        t == 'fast_food' ||
+        t == 'fastfood' ||
+        t.contains('burger') ||
+        t.contains('zinger') ||
+        t.contains('fries') ||
+        t.contains('nugget')) {
+      return 'Fast Food';
+    }
+    if (t.contains('drink') ||
+        t.contains('beverage') ||
+        t.contains('cola') ||
+        t.contains('juice') ||
+        t.contains('chai') ||
+        t.contains('tea')) {
+      return 'Drinks';
+    }
+    return null;
+  }
+
+  /// Collapse common category synonyms onto the exact chip values used by
+  /// [categories]. "drinks" → "drink", "mains" → "main", etc.
+  String? _normalizeCategoryLabel(String raw) {
+    final t = raw.trim().toLowerCase();
+    if (t.isEmpty || t == 'all') return null;
+
+    for (final label in categories) {
+      if (label == 'All') continue;
+      if (label.toLowerCase() == t) return label;
+    }
+
+    if (t.startsWith('starter') || t.contains('appetiz')) return 'starter';
+    if (t.startsWith('main')) return 'main';
+    if (t.startsWith('side')) return 'side';
+    if (t.startsWith('drink') || t.startsWith('beverage')) return 'drink';
+    if (t.startsWith('bread') || t.contains('naan') || t.contains('roti')) {
+      return 'bread';
+    }
+    return null;
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   Future<void> loadMenu() async {
@@ -46,6 +221,15 @@ class _MenuScreenState extends State<MenuScreen> {
     }
     if (!mounted) return;
     setState(() => loading = false);
+
+    // Filters seeded from the voice pipeline (or route arguments) must be
+    // reapplied after the menu arrives, otherwise the user lands on the
+    // unfiltered list even though the chips already look selected.
+    if (selectedCuisine != 'All' ||
+        selectedCategory != 'All' ||
+        searchQuery.isNotEmpty) {
+      applyFilters();
+    }
   }
 
   void applyFilters() {
@@ -127,6 +311,7 @@ class _MenuScreenState extends State<MenuScreen> {
                   Padding(
                     padding: const EdgeInsets.all(12),
                     child: TextField(
+                      controller: _searchController,
                       onChanged: (value) {
                         searchQuery = value;
                         applyFilters();
@@ -204,6 +389,8 @@ class _MenuScreenState extends State<MenuScreen> {
       bottomNavigationBar: AppConfig.isKiosk
           ? const KioskBottomNav(currentIndex: 1)
           : null,
+      floatingActionButton:
+          AppConfig.isKiosk ? const KioskVoiceFab() : null,
     );
   }
 }

@@ -8,6 +8,7 @@ import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
 import 'package:khaadim/services/cart_service.dart';
 import 'package:khaadim/services/dine_in_service.dart';
 import 'package:khaadim/utils/ImageResolver.dart';
+import 'package:khaadim/widgets/kiosk_voice_fab.dart';
 
 class CartScreen extends StatefulWidget {
   const CartScreen({super.key});
@@ -361,6 +362,7 @@ class _CartScreenState extends State<CartScreen> {
           appBar: AppBar(title: const Text("Your Cart")),
           body: _buildKioskBody(theme, dineIn),
           bottomNavigationBar: const KioskBottomNav(currentIndex: 1),
+          floatingActionButton: const KioskVoiceFab(),
         ),
       );
     }

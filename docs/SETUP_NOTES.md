@@ -80,7 +80,7 @@ http://127.0.0.1:8000/docs
 
 ## 4. Run Kitchen Dashboard (FastAPI)
 
-Kitchen dashboard is served by FastAPI (no separate Streamlit process required).
+Kitchen dashboard is served by FastAPI
 
 After backend is running, open:
 ```text
@@ -132,13 +132,13 @@ Admin dashboard is inside the customer app routes.
 ### 7.1 Web (direct route)
 ```powershell
 cd "D:\FAST\FYP\Khadim\App"
-flutter run -d chrome --target lib/main.dart --route /admin
+flutter run --flavor admin --target lib/main_admin.dart
 ```
 
 ### 7.2 Mobile (direct route)
 ```powershell
 cd "D:\FAST\FYP\Khadim\App"
-flutter run --flavor customer --target lib/main.dart --route /admin
+flutter run --target lib/main_admin.dart
 ```
 
 Alternative: run the customer app normally and navigate to Admin from inside the app.
