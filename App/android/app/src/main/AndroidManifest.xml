@@ -7,6 +7,17 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"/>
 
+    <!-- Required for local notifications (Re-engagement) -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!--
+      SCHEDULE_EXACT_ALARM  → needed on API 31-32 (Android 12)
+      USE_EXACT_ALARM       → needed on API 33+ (Android 13+), no user-grant dialog required
+    -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+
     <application
         android:label="@string/app_name"
         android:name="${applicationName}"
@@ -34,6 +45,31 @@
             </intent-filter>
 
         </activity>
+
+        <!--
+          BroadcastReceivers required by flutter_local_notifications for:
+            1. AlarmManager exact alarms to fire when app is in background / device is in Doze
+            2. Re-scheduling notifications after device reboot (RECEIVE_BOOT_COMPLETED)
+          Without these, scheduled notifications are silently lost when app is backgrounded.
+        -->
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
+            android:exported="false"/>
+
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+                <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+
+        <receiver
+            android:name="com.dexterous.flutterlocalnotifications.ActionBroadcastReceiver"
+            android:exported="false"/>
 
         <meta-data
             android:name="flutterEmbedding"

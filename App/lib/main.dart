@@ -26,6 +26,7 @@ import 'package:khaadim/screens/admin/admin_shell.dart';
 import 'package:khaadim/screens/dine_in/table_pin_screen.dart';
 import 'package:khaadim/screens/dine_in/dine_in_home_screen.dart';
 import 'package:khaadim/screens/dine_in/my_table_screen.dart';
+import 'package:khaadim/services/reengagement_service.dart';
 
 void main() {
   AppConfig.flavor = AppFlavor.customer; // ← ADDED
@@ -40,7 +41,7 @@ void main() {
   );
 }
 
-class KhaadimApp extends StatelessWidget {
+class KhaadimApp extends StatefulWidget {
   final String initialRoute;
 
   const KhaadimApp({
@@ -49,14 +50,57 @@ class KhaadimApp extends StatelessWidget {
   });
 
   @override
+  State<KhaadimApp> createState() => _KhaadimAppState();
+}
+
+class _KhaadimAppState extends State<KhaadimApp> with WidgetsBindingObserver {
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        await ReengagementService.instance.initialize(_navigatorKey);
+        // Cancel any pending background notification if user opened the app normally
+        await ReengagementService.instance.cancelPending();
+      } catch (e, stack) {
+        print('[Reengagement] Initialization Error: $e\n$stack');
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused) {
+      ReengagementService.instance.refreshAndSchedule().catchError((e, stack) {
+        print('[Reengagement] Failed to schedule on pause: $e\n$stack');
+      });
+    } else if (state == AppLifecycleState.resumed) {
+      // If user comes back before the 1-minute timer fires, cancel it
+      ReengagementService.instance.cancelPending().catchError((e, stack) {
+        print('[Reengagement] Failed to cancel on resume: $e\n$stack');
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Khaadim',
       debugShowCheckedModeBanner: false,
+      navigatorKey: _navigatorKey,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: ThemeMode.system,
-      initialRoute: initialRoute,
+      initialRoute: widget.initialRoute,
       routes: {
         '/splash': (context) => const SplashScreen(),
         '/login': (context) => const LoginScreen(),

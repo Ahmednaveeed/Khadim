@@ -354,31 +354,41 @@ Output MUST be valid JSON with this EXACT structure (no markdown, no extra text)
     ) -> Dict[str, Any]:
         """
         Filter out any recommended item_ids / deal_ids that don't
-        exist in the database.
+        exist in the database. Also enriches items with their category
+        and removes bread items from recommendations.
         """
         valid_item_ids: Set[int] = {it["item_id"] for it in available_items}
         valid_deal_ids: Set[int] = {d["deal_id"] for d in available_deals}
+
+        # Build category lookup from available items
+        category_map: Dict[int, str] = {
+            it["item_id"]: (it.get("category") or "fast_food")
+            for it in available_items
+        }
 
         rec_items = result.get("recommended_items", [])
         rec_deals = result.get("recommended_deals", [])
 
         result["recommended_items"] = [
             item for item in rec_items
-            if isinstance(item, dict) and item.get("item_id") in valid_item_ids
+            if isinstance(item, dict)
+            and item.get("item_id") in valid_item_ids
+            # Exclude bread items
+            and category_map.get(item.get("item_id"), "").lower() != "bread"
         ]
         result["recommended_deals"] = [
             deal for deal in rec_deals
             if isinstance(deal, dict) and deal.get("deal_id") in valid_deal_ids
         ]
 
-        # After filtering, add default score if missing
+        # After filtering, add default score, source, and category
         for item in result["recommended_items"]:
             item.setdefault("score", 50)
             item["source"] = "llm_personalization"
+            item["category"] = category_map.get(item.get("item_id", 0), "fast_food")
         for deal in result["recommended_deals"]:
             deal.setdefault("score", 50)
             deal["source"] = "llm_personalization"
-
 
         return result
 
@@ -425,13 +435,13 @@ Output MUST be valid JSON with this EXACT structure (no markdown, no extra text)
             return None
 
     def _get_all_menu_items(self) -> List[Dict[str, Any]]:
-        """Fetch all active menu items (id, name, price, cuisine)."""
+        """Fetch all active menu items (id, name, price, cuisine, category)."""
         try:
             with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
                     """
                     SELECT item_id, item_name, item_price AS price,
-                           item_cuisine AS cuisine
+                           item_cuisine AS cuisine, item_category AS category
                       FROM public.menu_item
                      ORDER BY item_id
                     """

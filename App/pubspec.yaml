@@ -26,6 +26,10 @@ dependencies:
   path_provider: ^2.0.15
   flutter_secure_storage: ^9.2.2
   fl_chart: ^1.2.0
+  flutter_local_notifications: ^17.2.3
+  shared_preferences: ^2.3.2
+  timezone: ^0.9.4
+  flutter_timezone: ^5.0.0
 
 dev_dependencies:
   flutter_test:
@@ -45,4 +49,11 @@ flutter:
     - assets/images/menu/drinks/
     - assets/images/menu/fast_food/
     - assets/images/deals/
+    # Flutter asset folders are NOT recursive — every deal subfolder needs
+    # its own entry, otherwise the files inside aren't bundled and every
+    # deal card falls back to `confirm.png` (the green checkmark).
+    - assets/images/deals/BBQ deals/
+    - assets/images/deals/Chinese Deals/
+    - assets/images/deals/Desi deals/
+    - assets/images/deals/FastFood deals/
     - assets/images/confirm.png

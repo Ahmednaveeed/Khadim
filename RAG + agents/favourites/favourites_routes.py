@@ -116,7 +116,8 @@ def get_favourites(current_user: Dict[str, Any] = Depends(get_current_user)):
         item_rows = conn.execute(
             text("""
                 SELECT f.favourite_id, f.created_at,
-                       m.item_id, m.item_name, m.item_price AS price, m.image_url
+                       m.item_id, m.item_name, m.item_price AS price,
+                       m.image_url, m.item_category AS category
                 FROM public.favourites f
                 JOIN public.menu_item m ON m.item_id = f.item_id
                 WHERE f.user_id = :uid AND f.item_id IS NOT NULL
@@ -191,6 +192,7 @@ def get_favourites(current_user: Dict[str, Any] = Depends(get_current_user)):
                 "item_name": r["item_name"],
                 "price": float(r["price"] or 0),
                 "image_url": r["image_url"] or "",
+                "category": r["category"] or "fast_food",
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
             }
             for r in item_rows

@@ -12,9 +12,27 @@ import 'package:khaadim/providers/dine_in_provider.dart';
 import 'package:khaadim/screens/dine_in/kiosk_bottom_nav.dart';
 import 'package:khaadim/utils/ImageResolver.dart';
 import 'package:khaadim/screens/cart/cart_screen.dart';
+import 'package:khaadim/widgets/kiosk_voice_fab.dart';
 
 class OffersScreen extends StatefulWidget {
-  const OffersScreen({super.key});
+  /// Optional pre-selected cuisine filter (e.g. "BBQ", "bbq", "fast food").
+  /// Accepts any common variant — it gets normalized to the chip label.
+  final String? initialCuisine;
+
+  /// Optional pre-selected serving-size filter ("1", "2", "3", "4", "5+",
+  /// or any number >= 5 which maps to "5+").
+  final String? initialServing;
+
+  /// Optional deal_id that should be highlighted and auto-scrolled into
+  /// view once the deals list finishes loading.
+  final int? highlightDealId;
+
+  const OffersScreen({
+    super.key,
+    this.initialCuisine,
+    this.initialServing,
+    this.highlightDealId,
+  });
 
   @override
   State<OffersScreen> createState() => _OffersScreenState();
@@ -22,6 +40,8 @@ class OffersScreen extends StatefulWidget {
 
 class _OffersScreenState extends State<OffersScreen> {
   final PageController _pageController = PageController();
+  final ScrollController _listScrollController = ScrollController();
+
   int _currentPage = 0;
 
   List<OfferModel> offers = [];
@@ -32,6 +52,12 @@ class _OffersScreenState extends State<OffersScreen> {
   String _searchQuery = '';
   String _selectedCuisine = 'All';
   String _selectedServing = 'All';
+
+  // ── Voice-driven highlight state ────────────────────────────
+  int? _highlightDealId;
+  final Map<int, GlobalKey> _dealKeys = <int, GlobalKey>{};
+  bool _routeArgsApplied = false;
+  bool _pendingHighlightScroll = false;
 
   static const List<String> _cuisineFilters = [
     'All',
@@ -99,14 +125,23 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   String _resolveDealImage(DealModel deal) {
+    // 1) Name-based bundled assets first — same as `DealsYou'llLoveSection`,
+    // `dine_in_home_screen`, and `ImageResolver.exactDealImages`. The API's
+    // `image_url` is often empty, a placeholder, or a path that was never
+    // added to `pubspec.yaml`; using it first made every card load fail and
+    // the `errorBuilder` showed `confirm.png` (green check) for all deals.
+    final byName = ImageResolver.getDealImage(deal.dealName);
+    if (byName != ImageResolver.fallbackImage) {
+      return byName;
+    }
+
+    // 2) Optional DB path when we don't have a name mapping (custom / new deals).
     final raw = deal.imageUrl.trim();
     if (raw.isNotEmpty) {
-      // Normalize DB-provided local asset paths.
       final normalized =
           raw.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '');
       final lower = normalized.toLowerCase();
 
-      // Ignore known placeholder values from backend and fall back to deal mapping.
       final isPlaceholder = lower.endsWith('confirm.png') ||
           lower.contains('/confirm.') ||
           lower.contains('placeholder');
@@ -124,11 +159,7 @@ class _OffersScreenState extends State<OffersScreen> {
       }
     }
 
-    final mapped = ImageResolver.getDealImage(deal.dealName);
-    if (mapped != ImageResolver.fallbackImage) {
-      return mapped;
-    }
-
+    // 3) Cuisine pool (stable per deal_id) when name + URL didn't resolve.
     final cuisine = _inferDealCuisine(deal);
     if (cuisine != null) {
       final pool = _dealImagePoolByCuisine[cuisine];
@@ -192,8 +223,143 @@ class _OffersScreenState extends State<OffersScreen> {
   @override
   void initState() {
     super.initState();
+    _applyInitialFiltersFromWidget();
     _loadData();
     _startAutoSlide();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_routeArgsApplied) return;
+    _routeArgsApplied = true;
+
+    // Voice navigation (and any future deep-link) can hand us filters via
+    // route arguments. Constructor args take priority; route args fill in
+    // whatever wasn't set explicitly so both paths work.
+    final raw = ModalRoute.of(context)?.settings.arguments;
+    if (raw is! Map) return;
+
+    String? readString(String key) {
+      final v = raw[key];
+      if (v == null) return null;
+      final s = v.toString().trim();
+      return s.isEmpty ? null : s;
+    }
+
+    bool changed = false;
+
+    final routeCuisine = readString('cuisine') ?? readString('cuisine_filter');
+    if (routeCuisine != null && _selectedCuisine == 'All') {
+      final label = _normalizeCuisineLabel(routeCuisine);
+      if (label != null) {
+        _selectedCuisine = label;
+        changed = true;
+      }
+    }
+
+    final routeServing = readString('serving') ?? readString('serving_filter');
+    if (routeServing != null && _selectedServing == 'All') {
+      final label = _normalizeServingLabel(routeServing);
+      if (label != null) {
+        _selectedServing = label;
+        changed = true;
+      }
+    }
+
+    final routeHighlight = raw['highlight_deal_id'] ?? raw['highlightDealId'];
+    if (_highlightDealId == null && routeHighlight != null) {
+      final parsed = routeHighlight is int
+          ? routeHighlight
+          : int.tryParse(routeHighlight.toString());
+      if (parsed != null && parsed > 0) {
+        _highlightDealId = parsed;
+        _pendingHighlightScroll = true;
+        changed = true;
+      }
+    }
+
+    if (changed && mounted) setState(() {});
+  }
+
+  /// Pulls filter values from the widget constructor the first time the
+  /// state object is created. Route arguments can still override these if
+  /// the constructor didn't set them (see [didChangeDependencies]).
+  void _applyInitialFiltersFromWidget() {
+    final cuisine = widget.initialCuisine;
+    if (cuisine != null && cuisine.trim().isNotEmpty) {
+      final label = _normalizeCuisineLabel(cuisine);
+      if (label != null) _selectedCuisine = label;
+    }
+
+    final serving = widget.initialServing;
+    if (serving != null && serving.trim().isNotEmpty) {
+      final label = _normalizeServingLabel(serving);
+      if (label != null) _selectedServing = label;
+    }
+
+    final highlight = widget.highlightDealId;
+    if (highlight != null && highlight > 0) {
+      _highlightDealId = highlight;
+      _pendingHighlightScroll = true;
+    }
+  }
+
+  /// Converts whatever shape the backend / voice pipeline sends (e.g.
+  /// "bbq", "BBQ", "fast_food", "fast food", "chinese") into the exact
+  /// chip label used by the filter bar. Returns null when the value isn't
+  /// one of the known cuisines so the caller can leave it as "All".
+  String? _normalizeCuisineLabel(String raw) {
+    final t = raw.trim().toLowerCase();
+    if (t.isEmpty || t == 'all') return null;
+
+    for (final label in _cuisineFilters) {
+      if (label == 'All') continue;
+      if (label.toLowerCase() == t) return label;
+    }
+
+    if (t == 'bbq' ||
+        t.contains('barbe') ||
+        t.contains('bar-b-q') ||
+        t.contains('tikka') ||
+        t.contains('boti')) {
+      return 'BBQ';
+    }
+    if (t.contains('chinese') ||
+        t.contains('chow') ||
+        t.contains('manchur') ||
+        t.contains('szechuan')) {
+      return 'Chinese';
+    }
+    if (t.contains('desi') ||
+        t.contains('pakistani') ||
+        t.contains('karahi') ||
+        t.contains('biryani') ||
+        t.contains('nihari')) {
+      return 'Desi';
+    }
+    if (t.contains('fast') ||
+        t == 'fast_food' ||
+        t == 'fastfood' ||
+        t.contains('burger') ||
+        t.contains('zinger') ||
+        t.contains('fries')) {
+      return 'Fast Food';
+    }
+    return null;
+  }
+
+  /// Backend sends serving size as an int-ish string (e.g. "2", "5", "7").
+  /// The chip bar only supports 1-4 + "5+" so collapse anything >= 5.
+  String? _normalizeServingLabel(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty || trimmed.toLowerCase() == 'all') return null;
+    if (trimmed == '5+') return '5+';
+
+    final n = int.tryParse(trimmed);
+    if (n == null || n <= 0) return null;
+    if (n >= 5) return '5+';
+    return n.toString();
   }
 
   Future<void> _loadData() async {
@@ -201,17 +367,56 @@ class _OffersScreenState extends State<OffersScreen> {
       final fetchedOffers = await OfferService.fetchOffers();
       final fetchedDeals = await DealService.fetchDeals();
 
+      if (!mounted) return;
       setState(() {
         offers = fetchedOffers;
         deals = fetchedDeals;
         loading = false;
       });
+      _maybeScrollToHighlightedDeal();
     } catch (e) {
       debugPrint("Error loading offers/deals: $e");
+      if (!mounted) return;
       setState(() {
         loading = false;
       });
     }
+  }
+
+  /// If a deal_id was handed to us via voice, scroll it into view and let
+  /// [_DealCard] draw the orange highlight ring. We also clear the flag so
+  /// hot reloads / re-renders don't keep bouncing the list.
+  void _maybeScrollToHighlightedDeal() {
+    if (!_pendingHighlightScroll) return;
+    final targetId = _highlightDealId;
+    if (targetId == null) return;
+
+    // Make sure the target deal actually survives the active filters. If
+    // the user's voice cuisine/serving combination filtered it out we fall
+    // back to showing "All" so the highlight is meaningful.
+    final visible = _filteredDeals;
+    final stillVisible = visible.any((d) => d.dealId == targetId);
+    if (!stillVisible) {
+      setState(() {
+        _selectedCuisine = 'All';
+        _selectedServing = 'All';
+      });
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final key = _dealKeys[targetId];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 450),
+          curve: Curves.easeInOut,
+          alignment: 0.1,
+        );
+      }
+      _pendingHighlightScroll = false;
+    });
   }
 
   void _startAutoSlide() {
@@ -238,6 +443,7 @@ class _OffersScreenState extends State<OffersScreen> {
   @override
   void dispose() {
     _pageController.dispose();
+    _listScrollController.dispose();
     super.dispose();
   }
 
@@ -497,9 +703,16 @@ class _OffersScreenState extends State<OffersScreen> {
                     else
                       ..._filteredDeals.map((deal) {
                         final img = _resolveDealImage(deal);
+                        final key =
+                            _dealKeys.putIfAbsent(deal.dealId, () => GlobalKey());
                         return Padding(
+                          key: key,
                           padding: const EdgeInsets.only(bottom: 16),
-                          child: _DealCard(deal: deal, image: img),
+                          child: _DealCard(
+                            deal: deal,
+                            image: img,
+                            highlight: _highlightDealId == deal.dealId,
+                          ),
                         );
                       }),
                   ],
@@ -507,6 +720,8 @@ class _OffersScreenState extends State<OffersScreen> {
               ),
         bottomNavigationBar:
             AppConfig.isKiosk ? const KioskBottomNav(currentIndex: 2) : null,
+        floatingActionButton:
+            AppConfig.isKiosk ? const KioskVoiceFab() : null,
       ),
     );
   }
@@ -593,6 +808,7 @@ class _OffersScreenState extends State<OffersScreen> {
   }
 
   /// DEAL CARD
+  // ignore: unused_element
   Widget _buildDealCard(
     BuildContext context, {
     required String image,
@@ -735,7 +951,17 @@ class _OffersScreenState extends State<OffersScreen> {
 class _DealCard extends StatefulWidget {
   final DealModel deal;
   final String image;
-  const _DealCard({required this.deal, required this.image});
+
+  /// When true, the card shows an orange highlight ring — used by the
+  /// voice pipeline to point the user at the deal that matched their
+  /// spoken query.
+  final bool highlight;
+
+  const _DealCard({
+    required this.deal,
+    required this.image,
+    this.highlight = false,
+  });
 
   @override
   State<_DealCard> createState() => _DealCardState();
@@ -863,15 +1089,22 @@ class _DealCardState extends State<_DealCard> {
     final theme = Theme.of(context);
     final deal = widget.deal;
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
       width: double.infinity,
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
+        border: widget.highlight
+            ? Border.all(color: Colors.orangeAccent, width: 2.2)
+            : null,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 6,
+            color: widget.highlight
+                ? Colors.orangeAccent.withOpacity(0.35)
+                : Colors.black.withOpacity(0.05),
+            blurRadius: widget.highlight ? 16 : 6,
             offset: const Offset(0, 3),
           ),
         ],

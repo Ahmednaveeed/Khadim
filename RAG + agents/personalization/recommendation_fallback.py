@@ -93,6 +93,9 @@ class RecommendationFallback:
             # 4. Add human-readable reasons
             items = self._add_reasons(items, source)
 
+            # Filter bread items and enrich with category
+            items = self._filter_bread_items(items)
+
             # Hard-cap to match LLM path limits
             items = items[:5]
             deals = deals[:3]
@@ -360,6 +363,7 @@ class RecommendationFallback:
                          WHERE oi.item_type = 'menu_item'
                            AND o.created_at >= NOW() - INTERVAL '7 days'
                            AND mi.item_cuisine = %s
+                           AND mi.item_category != 'bread'
                          GROUP BY oi.item_id, mi.item_name
                          ORDER BY order_count DESC, avg_rating DESC
                          LIMIT %s
@@ -379,6 +383,7 @@ class RecommendationFallback:
                      LEFT JOIN public.feedback f ON f.item_id = oi.item_id
                          WHERE oi.item_type = 'menu_item'
                            AND o.created_at >= NOW() - INTERVAL '7 days'
+                           AND mi.item_category != 'bread'
                          GROUP BY oi.item_id, mi.item_name
                          ORDER BY order_count DESC, avg_rating DESC
                          LIMIT %s
@@ -448,6 +453,44 @@ class RecommendationFallback:
         except Exception:
             logger.exception("Failed to fetch disliked set for user %s", user_id)
             return set()
+
+    def _filter_bread_items(
+        self, items: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        Look up item_category from DB for the given items, enrich each
+        item with its 'category' field, and remove bread items.
+        """
+        if not items:
+            return items
+        item_ids = [i["item_id"] for i in items if "item_id" in i]
+        if not item_ids:
+            return items
+        try:
+            with self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    SELECT item_id, item_category AS category
+                      FROM public.menu_item
+                     WHERE item_id = ANY(%s)
+                    """,
+                    (item_ids,),
+                )
+                category_map: Dict[int, str] = {
+                    r["item_id"]: (r["category"] or "fast_food")
+                    for r in cur.fetchall()
+                }
+            filtered = []
+            for item in items:
+                cat = category_map.get(item.get("item_id", 0), "fast_food")
+                if cat.lower() == "bread":
+                    continue
+                item["category"] = cat
+                filtered.append(item)
+            return filtered
+        except Exception:
+            logger.exception("Failed to filter bread items in fallback")
+            return items
 
     # ─────────────────────────────────────────────────────────────
     # Reason generation (deterministic — no LLM)

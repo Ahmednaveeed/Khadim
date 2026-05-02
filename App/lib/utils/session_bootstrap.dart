@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../services/token_storage.dart';
 import '../services/auth_service.dart';
 import '../services/api_client.dart';
+import '../services/reengagement_service.dart';
 import '../providers/cart_provider.dart';
 
 class SessionBootstrap {
@@ -29,6 +30,12 @@ class SessionBootstrap {
 
       await context.read<CartProvider>().initCart(userId);
       if (!context.mounted) return;
+
+      try {
+        ReengagementService.instance.setUserId(userId);
+      } catch (e, stack) {
+        print('[SessionBootstrap] Failed to set reengagement user: $e\n$stack');
+      }
 
       _goMain(context);
     } on ApiException catch (e) {

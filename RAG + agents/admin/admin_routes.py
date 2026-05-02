@@ -306,15 +306,26 @@ def admin_revenue(
     """)
 
     daily_sql = text(f"""
-        SELECT
-            DATE(o.created_at AT TIME ZONE 'Asia/Karachi') AS day,
-            COALESCE(SUM(total_price), 0)                  AS revenue
-        FROM orders o
-        WHERE o.created_at >= NOW() - INTERVAL '1 day' * :days
-          AND o.status NOT IN ('cancelled')
-        {cat_filter}
-        GROUP BY day
-        ORDER BY day ASC
+        WITH date_range AS (
+            SELECT (CURRENT_DATE - (i || ' day')::interval)::date AS day
+            FROM generate_series(0, :days - 1) AS i
+        ),
+        daily_revenue AS (
+            SELECT
+                DATE(o.created_at AT TIME ZONE 'Asia/Karachi') AS day,
+                COALESCE(SUM(total_price), 0)                  AS revenue
+            FROM orders o
+            WHERE o.created_at >= NOW() - INTERVAL '1 day' * :days
+              AND o.status NOT IN ('cancelled')
+            {cat_filter}
+            GROUP BY day
+        )
+        SELECT 
+            dr.day,
+            COALESCE(rev.revenue, 0) AS revenue
+        FROM date_range dr
+        LEFT JOIN daily_revenue rev ON rev.day = dr.day
+        ORDER BY dr.day ASC
     """)
 
     with SQL_ENGINE.connect() as conn:

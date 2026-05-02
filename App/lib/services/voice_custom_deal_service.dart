@@ -1,10 +1,10 @@
 // lib/services/voice_custom_deal_service.dart
 //
 // Voice custom deal flow:
-// 1. POST /voice/custom_deal → CustomDealAgent generates deal
+// 1. POST /deals/custom → CustomDealAgent generates deal
 // 2. TTS speaks summary → bottom sheet confirmation dialog
-// 3. User confirms → POST /custom-deal/save → get custom_deal_id
-// 4. POST /cart/items/add with item_type=custom_deal
+// 3. Kiosk: add as local dine-in custom bundle, Delivery: save to /custom-deal/save
+// 4. Delivery only: POST /cart/items/add with item_type=custom_deal
 //
 // Uses your EXISTING endpoints — no new backend code needed.
 
@@ -14,15 +14,29 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
+import 'package:khaadim/app_config.dart';
+import 'package:khaadim/providers/dine_in_provider.dart';
 import 'package:khaadim/services/api_config.dart';
 import 'package:khaadim/services/token_storage.dart';
 import 'package:khaadim/services/cart_service.dart';
 import 'package:khaadim/providers/cart_provider.dart';
 
+/// Signature for an external speaker that can route text through the
+/// backend gTTS pipeline (needed for Urdu) and gracefully fall back to the
+/// on-device TTS engine. Pass the owning widget's `_speak` to wire it up.
+typedef VoiceSpeaker = Future<void> Function(String text);
+
 class VoiceCustomDealService {
   final FlutterTts _tts;
 
-  VoiceCustomDealService(this._tts);
+  /// Optional hook to let the caller do the actual speaking. When provided,
+  /// all `_speak(...)` invocations delegate to it — this is what routes
+  /// Urdu messages through the backend gTTS endpoint instead of
+  /// `FlutterTts`, which may not have an Urdu voice installed.
+  final VoiceSpeaker? _externalSpeaker;
+
+  VoiceCustomDealService(this._tts, {VoiceSpeaker? speaker})
+      : _externalSpeaker = speaker;
 
   // ─────────────────────────────────────────────────────────
   // Main entry — called from VoiceOrderHandler
@@ -34,28 +48,41 @@ class VoiceCustomDealService {
   }) async {
     try {
       final token = await TokenStorage.getToken();
+      final isKiosk = AppConfig.isKiosk;
 
       // ── Step 1: Generate deal via AI ──────────────────────
       final genResp = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/voice/custom_deal'),
+        Uri.parse('${ApiConfig.baseUrl}/deals/custom'),
         headers: {
           'Content-Type':  'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
+          if (token != null && token.isNotEmpty)
+            'Authorization': 'Bearer $token',
         },
-        body: jsonEncode({'user_query': userQuery}),
+        body: jsonEncode({'query': userQuery}),
       ).timeout(const Duration(seconds: 25));
 
       final data = jsonDecode(genResp.body) as Map<String, dynamic>;
 
       // ── Needs clarification ───────────────────────────────
       if (data['needs_clarification'] == true || data['success'] == false) {
-        final msg = language == 'ur'
-            ? (data['message']    as String? ?? 'مزید معلومات دیں')
-            : (data['message_en'] as String? ?? 'Please provide more details');
-        await _speak(msg);
+        final displayMsg = (data['message_en'] as String?)
+            ?? (data['message']    as String?)
+            ?? (language == 'ur'
+                ? 'مزید معلومات دیں'
+                : 'Please provide more details');
+
+        // Prefer the backend's explicit voice message — it's plain text,
+        // shorter, and safe for TTS.
+        final voiceMsg = (data['message_voice'] as String?)?.trim();
+        await _speak(
+          (voiceMsg != null && voiceMsg.isNotEmpty)
+              ? voiceMsg
+              : displayMsg,
+        );
+
         return VoiceCustomDealResult(
           needsClarification:    true,
-          clarificationQuestion: msg,
+          clarificationQuestion: displayMsg,
         );
       }
 
@@ -68,8 +95,16 @@ class VoiceCustomDealService {
           : (data['message_en'] as String? ?? '');
       final fullMsg    = data['full_message'] as String? ?? '';
 
-      // Speak the summary
-      await _speak(summaryMsg);
+      // Prefer the backend's plain-text `message_voice` — the `message` field
+      // is full of markdown (**bold**) and emojis which TTS engines pronounce
+      // literally ("sitara sitara" for the `*` char on Urdu voices).
+      final voiceFromBackend =
+          (data['message_voice'] as String? ?? '').trim();
+      final spokenText = voiceFromBackend.isNotEmpty
+          ? voiceFromBackend
+          : _sanitizeForSpeech(summaryMsg);
+
+      await _speak(spokenText);
 
       // ── Step 2: Show confirmation dialog ──────────────────
       if (!context.mounted) {
@@ -88,12 +123,49 @@ class VoiceCustomDealService {
         return VoiceCustomDealResult(confirmed: false);
       }
 
+      // ── Kiosk path: store as local custom bundle in dine-in provider ──
+      if (isKiosk) {
+        if (!context.mounted) {
+          return const VoiceCustomDealResult(confirmed: true);
+        }
+
+        final dineIn = Provider.of<DineInProvider>(context, listen: false);
+        final customDealId = -DateTime.now().millisecondsSinceEpoch;
+
+        final computedGroupSize = items.fold<int>(
+          0,
+          (sum, item) {
+            final rawQty = item['quantity'];
+            final qty = rawQty is int
+                ? rawQty
+                : int.tryParse((rawQty ?? '1').toString()) ?? 1;
+            return sum + (qty > 0 ? qty : 1);
+          },
+        );
+
+        dineIn.addCustomDeal(
+          customDealId: customDealId,
+          title: language == 'ur' ? 'کسٹم ڈیل' : 'Custom Deal',
+          totalPrice: totalPrice,
+          groupSize: computedGroupSize > 0 ? computedGroupSize : items.length,
+          bundleItems: items,
+        );
+
+        final doneMsg = language == 'ur'
+            ? 'کسٹم ڈیل آپ کے آرڈر میں شامل کر دی گئی ہے۔'
+            : 'Custom deal has been added to your order.';
+        await _speak(doneMsg);
+
+        return const VoiceCustomDealResult(confirmed: true, addedToCart: true);
+      }
+
       // ── Step 3: Save deal via /custom-deal/save ───────────
       final saveResp = await http.post(
         Uri.parse('${ApiConfig.baseUrl}/custom-deal/save'),
         headers: {
           'Content-Type':  'application/json',
-          if (token != null) 'Authorization': 'Bearer $token',
+          if (token != null && token.isNotEmpty)
+            'Authorization': 'Bearer $token',
         },
         body: jsonEncode({
           'group_size':       items.length,
@@ -151,8 +223,11 @@ class VoiceCustomDealService {
 
       return VoiceCustomDealResult(confirmed: true, addedToCart: true);
 
-    } catch (e) {
+    } catch (e, st) {
+      // Surface the real exception in logs so subsequent regressions are
+      // diagnosable. The user-facing message stays polite and localised.
       debugPrint('[VoiceCustomDeal] Error: $e');
+      debugPrint('[VoiceCustomDeal] Stack: $st');
       return VoiceCustomDealResult(
         error: language == 'ur' ? 'ڈیل بنانے میں خرابی' : 'Error creating deal',
       );
@@ -185,9 +260,86 @@ class VoiceCustomDealService {
   }
 
   Future<void> _speak(String text) async {
-    if (text.isEmpty) return;
-    await _tts.stop();
-    await _tts.speak(text);
+    try {
+      final clean = _sanitizeForSpeech(text);
+      if (clean.isEmpty) return;
+
+      // Prefer the owner's speak pipeline — it already routes Urdu through
+      // the backend gTTS endpoint and only falls back to `FlutterTts` when
+      // that fails. Using `_tts.speak` directly here would mean no Urdu
+      // audio at all on devices without a native Urdu voice.
+      final speaker = _externalSpeaker;
+      if (speaker != null) {
+        await speaker(clean);
+        return;
+      }
+
+      await _tts.stop();
+      await _tts.speak(clean);
+    } catch (e, st) {
+      debugPrint('[VoiceCustomDeal] TTS speak failed: $e\n$st');
+    }
+  }
+
+  /// Removes markdown decorations (`**`, `#`, backticks, bullets) and all
+  /// emoji / pictographic symbols without using supplementary-plane regex
+  /// escapes — which can throw on older Dart SDKs when the regex is first
+  /// compiled. Iterating code units is portable and fast.
+  String _sanitizeForSpeech(String input) {
+    if (input.isEmpty) return input;
+
+    var s = input;
+
+    // Strip fenced / inline code blocks.
+    s = s.replaceAll(RegExp(r'```[\s\S]*?```'), ' ');
+    s = s.replaceAll(RegExp(r'`([^`]*)`'), r' $1 ');
+
+    // Markdown link [text](url) → text
+    s = s.replaceAllMapped(
+      RegExp(r'\[([^\]]+)\]\([^)]*\)'),
+      (m) => m.group(1) ?? '',
+    );
+
+    // Strip leading heading / bullet markers line-by-line. Dart's RegExp
+    // does NOT accept the inline `(?m)` flag (it's ECMA-flavoured) — we
+    // must pass `multiLine: true` explicitly, or the RegExp constructor
+    // throws FormatException and the whole voice reply fails silently.
+    s = s.replaceAll(RegExp(r'^\s*#{1,6}\s+', multiLine: true), '');
+    s = s.replaceAll(RegExp(r'^\s*[-*•]\s+', multiLine: true), '');
+
+    // Remove remaining markdown emphasis characters.
+    s = s.replaceAll(RegExp(r'[*_~`#>]+'), ' ');
+
+    // Replace the multiplication sign ('×') that appears in deal lists.
+    s = s.replaceAll('×', ' x ');
+
+    // Drop emojis / pictographs using a manual codepoint filter. This avoids
+    // the `unicode: true` + `\u{1F300}` regex syntax which fails on some
+    // Dart/Flutter runtimes.
+    final buf = StringBuffer();
+    final runes = s.runes.toList();
+    for (final rune in runes) {
+      if (_isPictographOrSymbol(rune)) {
+        buf.write(' ');
+      } else {
+        buf.writeCharCode(rune);
+      }
+    }
+    s = buf.toString();
+
+    // Collapse whitespace.
+    s = s.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return s;
+  }
+
+  bool _isPictographOrSymbol(int rune) {
+    // Misc symbols & dingbats (BMP).
+    if (rune >= 0x2600 && rune <= 0x27BF) return true;
+    // Supplemental symbols & pictographs, emoticons, transport, etc.
+    if (rune >= 0x1F000 && rune <= 0x1FAFF) return true;
+    // Variation selectors and zero-width joiner used in emoji sequences.
+    if (rune == 0x200D || rune == 0xFE0F) return true;
+    return false;
   }
 }
 

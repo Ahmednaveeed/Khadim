@@ -9,18 +9,35 @@ import 'package:provider/provider.dart';
 
 class DealsYouLoveSection extends StatefulWidget {
   final Future<RecommendationResult> future;
-  const DealsYouLoveSection({super.key, required this.future});
+  final int? highlightDealId;
+  final String? highlightDealName;
+
+  const DealsYouLoveSection({
+    super.key,
+    required this.future,
+    this.highlightDealId,
+    this.highlightDealName,
+  });
 
   @override
   State<DealsYouLoveSection> createState() => _DealsYouLoveSectionState();
 }
 
 class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   final Set<int> _adding = {};
 
+  // Shimmer while loading
   late AnimationController _shimmerController;
   late Animation<double> _shimmerAnim;
+
+  // Pulsing glow on the highlighted card
+  late AnimationController _pulseController;
+  late Animation<double> _pulseAnim;
+
+  // Keys for scrolling
+  final Map<int, GlobalKey> _dealKeys = {};
+  bool _hasScrolledToHighlight = false;
 
   @override
   void initState() {
@@ -32,12 +49,40 @@ class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
     _shimmerAnim = Tween<double>(begin: 0.3, end: 0.7).animate(
       CurvedAnimation(parent: _shimmerController, curve: Curves.easeInOut),
     );
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
   }
 
   @override
   void dispose() {
     _shimmerController.dispose();
+    _pulseController.dispose();
     super.dispose();
+  }
+
+  void _maybeScrollToHighlight(int dealId) {
+    if (_hasScrolledToHighlight) return;
+    if (widget.highlightDealId == null) return;
+    if (dealId != widget.highlightDealId) return;
+
+    _hasScrolledToHighlight = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _dealKeys[dealId];
+      if (key?.currentContext != null) {
+        Scrollable.ensureVisible(
+          key!.currentContext!,
+          duration: const Duration(milliseconds: 700),
+          curve: Curves.easeInOut,
+          alignment: 0.25,
+        );
+      }
+    });
   }
 
   Future<void> _addDeal(RecommendedDeal deal) async {
@@ -96,7 +141,28 @@ class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
         if (result == null || result.recommendedDeals.isEmpty) {
           return const SizedBox.shrink();
         }
-        return _buildSection(context, result.recommendedDeals);
+
+        final displayDeals = List<RecommendedDeal>.from(result.recommendedDeals);
+
+        // Inject highlighted deal if missing
+        if (widget.highlightDealId != null &&
+            widget.highlightDealName != null &&
+            !displayDeals.any((d) => d.dealId == widget.highlightDealId)) {
+          displayDeals.insert(
+            0,
+            RecommendedDeal(
+              dealId: widget.highlightDealId!,
+              dealName: widget.highlightDealName!,
+              score: 0.0,
+              reason: 'A deal you love',
+              source: 'favourite_deal',
+              category: 'deal',
+              items: '', // We don't have items without another fetch
+            ),
+          );
+        }
+
+        return _buildSection(context, displayDeals);
       },
     );
   }
@@ -145,20 +211,34 @@ class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
     final theme = Theme.of(context);
     final isAdding = _adding.contains(deal.dealId);
 
-    return Container(
+    // Track scroll target
+    if (!_dealKeys.containsKey(deal.dealId)) {
+      _dealKeys[deal.dealId] = GlobalKey();
+    }
+    _maybeScrollToHighlight(deal.dealId);
+
+    final isHighlighted = widget.highlightDealId == deal.dealId;
+
+    Widget card = Container(
+      key: _dealKeys[deal.dealId],
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: isHighlighted
+            ? theme.colorScheme.primary.withOpacity(0.06)
+            : theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 8,
+            color: isHighlighted
+                ? theme.colorScheme.primary.withOpacity(0.18)
+                : Colors.black.withOpacity(0.05),
+            blurRadius: isHighlighted ? 14 : 8,
+            spreadRadius: isHighlighted ? 1 : 0,
             offset: const Offset(0, 2),
           ),
         ],
-        border: Border.all(
-          color: theme.colorScheme.outline.withOpacity(0.10),
-        ),
+        border: isHighlighted
+            ? Border.all(color: theme.colorScheme.primary, width: 2)
+            : Border.all(color: theme.colorScheme.outline.withOpacity(0.10)),
       ),
       child: Row(
         children: [
@@ -189,13 +269,36 @@ class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    deal.dealName,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          deal.dealName,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (isHighlighted)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: theme.colorScheme.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            '✦ Just For You',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.primary,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   if (deal.reason.isNotEmpty) ...[
                     const SizedBox(height: 3),
@@ -290,6 +393,32 @@ class _DealsYouLoveSectionState extends State<DealsYouLoveSection>
         ],
       ),
     );
+
+    if (isHighlighted) {
+      return AnimatedBuilder(
+        animation: _pulseAnim,
+        builder: (ctx, child) {
+          return Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: theme.colorScheme.primary.withOpacity(
+                    0.05 + (_pulseAnim.value * 0.15),
+                  ),
+                  blurRadius: 10 + (_pulseAnim.value * 10),
+                  spreadRadius: _pulseAnim.value * 2,
+                ),
+              ],
+            ),
+            child: child,
+          );
+        },
+        child: card,
+      );
+    }
+
+    return card;
   }
 
   Widget _buildShimmerSection(BuildContext context) {

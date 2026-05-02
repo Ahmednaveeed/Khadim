@@ -6,6 +6,7 @@ import 'package:khaadim/screens/discover/custom_deal_screen.dart';
 import 'package:khaadim/screens/home/widgets/recommended_section.dart';
 import 'package:khaadim/screens/home/widgets/deals_you_love_section.dart';
 import 'package:khaadim/services/personalization_service.dart';
+import 'package:khaadim/services/reengagement_service.dart';
 import 'package:khaadim/models/recommendation_result.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,14 +21,39 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late Future<RecommendationResult> _recommendationFuture;
 
+  /// Non-null when the screen was opened via a re-engagement notification.
+  /// Passed to [RecommendedForYouSection] to scroll-to and highlight that card.
+  int? _highlightItemId;
+  int? _highlightDealId;
+  String? _highlightItemName;
+
   @override
   void initState() {
     super.initState();
     _recommendationFuture = PersonalizationService.getRecommendations(topK: 10);
-    // Show upsell popup only once per app session
-    if (!_upsellShown) {
+
+    // Consume any pending highlight set by a notification tap
+    final rawHighlightId =
+        ReengagementService.instance.consumePendingHighlightItemId();
+    _highlightItemName =
+        ReengagementService.instance.consumePendingHighlightItemName();
+
+    if (rawHighlightId != null) {
+      if (rawHighlightId < 0) {
+        _highlightDealId = -rawHighlightId;
+      } else {
+        _highlightItemId = rawHighlightId;
+      }
+    }
+
+    // Show upsell popup only once per app session, and skip it when the
+    // user arrived via a notification (we don't want a popup on top of the highlight)
+    if (!_upsellShown && _highlightItemId == null && _highlightDealId == null) {
       _upsellShown = true;
       WidgetsBinding.instance.addPostFrameCallback((_) => _showUpsellPopup());
+    } else if (!_upsellShown) {
+      // Mark as shown so it won't appear next normal open either
+      _upsellShown = true;
     }
   }
 
@@ -137,9 +163,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      RecommendedForYouSection(future: _recommendationFuture),
+                      RecommendedForYouSection(
+                        future: _recommendationFuture,
+                        highlightItemId: _highlightItemId,
+                        highlightItemName: _highlightItemName,
+                      ),
                       const SizedBox(height: 20),
-                      DealsYouLoveSection(future: _recommendationFuture),
+                      DealsYouLoveSection(
+                        future: _recommendationFuture,
+                        highlightDealId: _highlightDealId,
+                        highlightDealName: _highlightItemName,
+                      ),
                       const SizedBox(height: 20),
                     ],
                   );
